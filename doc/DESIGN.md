@@ -24,4 +24,5 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 - `max_linear`: maximum linear velocity.
 - `max_angular`: maximum angular velocity.
 - `alpha`: coefficient for the low-pass filter used on linear velocity.
+- `debug`: enable OpenCV visualization when set to `true`.
 
