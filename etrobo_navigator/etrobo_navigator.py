@@ -12,15 +12,15 @@ class NavigatorNode(Node):
         super().__init__('navigator_node')
 
         # --- Parameters ---
-        # Y-coordinates of scan lines distributed vertically
-        self.scan_lines = [  # closer lines have higher priority
-            300, 320, 340, 360, 380, 400
+        # Normalized y-positions of scan lines (0.0 = top, 1.0 = bottom)
+        # Closer scan lines have higher priority
+        self.scan_lines = [
+            0.625, 0.666, 0.708, 0.75, 0.791, 0.833
         ]
         # Weights biased toward the lower part of the image (sum to 1.0)
         self.weights = [
             0.1, 0.1, 0.15, 0.2, 0.25, 0.2
         ]
-        self.image_width = 640                 # Width of the image
         self.operation_gain = 0.005            # Gain for deviation-to-angular conversion
         # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
         # With 28 mm wheel radius, the theoretical max is about 0.62 m/s
@@ -51,10 +51,13 @@ class NavigatorNode(Node):
         # Thresholding to extract dark line (invert: dark becomes white)
         _, binary = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
 
+        height, width = binary.shape[:2]
+
         # Process each scan line and collect debug info
         cx_list = []
         debug_info = []  # (y position, center x or None)
-        for y, w in zip(self.scan_lines, self.weights):
+        for ratio, w in zip(self.scan_lines, self.weights):
+            y = int(ratio * height)
             row = binary[y, :]
             indices = np.where(row == 255)[0]
             if len(indices) > 0:
@@ -77,7 +80,7 @@ class NavigatorNode(Node):
             return
 
         # Compute weighted deviation from image center
-        deviation_sum = sum((cx - self.image_width // 2)
+        deviation_sum = sum((cx - width // 2)
                             * w for cx, w in cx_list)
         total_weight = sum(w for _, w in cx_list)
         deviation = deviation_sum / total_weight
@@ -126,23 +129,24 @@ class NavigatorNode(Node):
     ) -> None:
         """Draw debug information on the image and display it."""
         debug_image = image.copy()
+        width = image.shape[1]
 
         for y, cx in debug_info:
-            cv2.line(debug_image, (0, y), (self.image_width - 1, y), (255, 0, 0), 1)
+            cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
             if cx is not None:
                 cv2.circle(debug_image, (cx, y), 4, (0, 255, 0), -1)
             else:
                 cv2.line(
                     debug_image,
-                    (self.image_width // 2 - 5, y - 5),
-                    (self.image_width // 2 + 5, y + 5),
+                    (width // 2 - 5, y - 5),
+                    (width // 2 + 5, y + 5),
                     (0, 0, 255),
                     1,
                 )
                 cv2.line(
                     debug_image,
-                    (self.image_width // 2 - 5, y + 5),
-                    (self.image_width // 2 + 5, y - 5),
+                    (width // 2 - 5, y + 5),
+                    (width // 2 + 5, y - 5),
                     (0, 0, 255),
                     1,
                 )
