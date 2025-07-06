@@ -16,13 +16,14 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 5. Publish the resulting `Twist`.
 
 ## Parameters
-- `scan_lines`: list of y coordinates used for line detection.
+- `scan_lines`: list of normalized y positions (ratio of image height) used for line detection.
 - `weights`: weight value for each scan line.
-- `image_width`: width of the camera image.
 - `operation_gain`: gain to transform the deviation into an angular velocity.
 - `min_linear`: minimum linear velocity.
 - `max_linear`: maximum linear velocity.
 - `max_angular`: maximum angular velocity.
 - `alpha`: coefficient for the low-pass filter used on linear velocity.
 - `debug`: enable OpenCV visualization when set to `true`.
+
+The node retrieves the image width and height from each received frame, so it can adapt to different camera resolutions.
 
