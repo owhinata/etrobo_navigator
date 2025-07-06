@@ -20,3 +20,9 @@ colcon build --symlink-install --packages-select etrobo_navigator
 ros2 run etrobo_navigator etrobo_navigator
 ```
 
+To enable debug visualization:
+
+```bash
+ros2 run etrobo_navigator etrobo_navigator --ros-args -p debug:=true
+```
+

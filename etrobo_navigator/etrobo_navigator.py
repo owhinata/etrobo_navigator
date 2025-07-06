@@ -32,6 +32,10 @@ class NavigatorNode(Node):
 
         self.bridge = CvBridge()
 
+        # Debug parameter to enable OpenCV visualization
+        self.declare_parameter('debug', False)
+        self.debug = self.get_parameter('debug').value
+
         # --- Publisher and Subscriber ---
         self.sub = self.create_subscription(
             Image, '/camera_top/camera_top/image_raw', self.image_callback, 10)
@@ -63,7 +67,12 @@ class NavigatorNode(Node):
         confidence = len(cx_list) / len(self.scan_lines)
 
         if len(cx_list) == 0:
-            self._show_debug(cv_image, debug_info, message="No line detected")
+            if self.debug:
+                self._show_debug(
+                    cv_image,
+                    debug_info,
+                    message="No line detected",
+                )
             self.get_logger().warn("No line detected.")
             return
 
@@ -97,13 +106,14 @@ class NavigatorNode(Node):
         self.get_logger().info(
             f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}")
 
-        self._show_debug(
-            cv_image,
-            debug_info,
-            deviation=deviation,
-            angular=angular,
-            confidence=confidence,
-        )
+        if self.debug:
+            self._show_debug(
+                cv_image,
+                debug_info,
+                deviation=deviation,
+                angular=angular,
+                confidence=confidence,
+            )
 
     def _show_debug(
         self,
@@ -186,7 +196,7 @@ class NavigatorNode(Node):
 
 def main(args=None):
     """Entry point for the runner node."""
-    rclpy.init()
+    rclpy.init(args=args)
     runner = NavigatorNode()
     try:
         rclpy.spin(runner)
@@ -194,7 +204,8 @@ def main(args=None):
         pass
     runner.destroy_node()
     rclpy.try_shutdown()
-    cv2.destroyAllWindows()
+    if runner.debug:
+        cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
