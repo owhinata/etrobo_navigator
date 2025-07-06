@@ -47,16 +47,64 @@ class NavigatorNode(Node):
         # Thresholding to extract dark line (invert: dark becomes white)
         _, binary = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
 
-        # Process each scan line
+        # Process each scan line and collect debug info
         cx_list = []
+        debug_info = []  # (y position, center x or None)
         for y, w in zip(self.scan_lines, self.weights):
             row = binary[y, :]
             indices = np.where(row == 255)[0]
             if len(indices) > 0:
                 cx = int(np.mean(indices))
                 cx_list.append((cx, w))
+                debug_info.append((y, cx))
+            else:
+                debug_info.append((y, None))
+
+        confidence = len(cx_list) / len(self.scan_lines)
+
+        debug_image = cv_image.copy()
+        for y, cx in debug_info:
+            # Draw horizontal scan line
+            cv2.line(
+                debug_image,
+                (0, y),
+                (self.image_width - 1, y),
+                (255, 0, 0),
+                1,
+            )
+            if cx is not None:
+                # Mark detected center
+                cv2.circle(debug_image, (cx, y), 4, (0, 255, 0), -1)
+            else:
+                # Draw red X when the line is not detected
+                cv2.line(
+                    debug_image,
+                    (self.image_width // 2 - 5, y - 5),
+                    (self.image_width // 2 + 5, y + 5),
+                    (0, 0, 255),
+                    1,
+                )
+                cv2.line(
+                    debug_image,
+                    (self.image_width // 2 - 5, y + 5),
+                    (self.image_width // 2 + 5, y - 5),
+                    (0, 0, 255),
+                    1,
+                )
 
         if len(cx_list) == 0:
+            cv2.putText(
+                debug_image,
+                "No line detected",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.imshow("debug", debug_image)
+            cv2.waitKey(1)
             self.get_logger().warn("No line detected.")
             return
 
@@ -90,6 +138,41 @@ class NavigatorNode(Node):
         self.get_logger().info(
             f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}")
 
+        # Draw debug texts on the image
+        cv2.putText(
+            debug_image,
+            f"Deviation: {deviation:.1f}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            debug_image,
+            f"Angular: {angular:.2f}",
+            (10, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            debug_image,
+            f"Confidence: {confidence:.2f}",
+            (10, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+        cv2.imshow("debug", debug_image)
+        cv2.waitKey(1)
+
 
 def main(args=None):
     """Entry point for the runner node."""
@@ -101,6 +184,7 @@ def main(args=None):
         pass
     runner.destroy_node()
     rclpy.try_shutdown()
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
