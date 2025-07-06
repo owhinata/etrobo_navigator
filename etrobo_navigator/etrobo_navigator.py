@@ -20,7 +20,7 @@ class NavigatorNode(Node):
         # With 28 mm wheel radius, the theoretical max is about 0.62 m/s
         self.min_linear = 0.1                  # Min linear velocity [m/s]
         self.max_linear = 0.4                  # Max linear velocity [m/s]
-        self.max_angular = 1.0                 # Max angular velocity [rad/s]
+        self.max_angular = 0.6                 # Max angular velocity [rad/s]
         self.alpha = 0.7                       # Low-pass filter coefficient
         self.prev_linear = 0.1                 # Previous linear velocity
 
