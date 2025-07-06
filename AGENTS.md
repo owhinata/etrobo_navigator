@@ -16,6 +16,7 @@ For simulation:
 - Follow the PEP 8 coding style.  
 - When adding new features, make only the minimum necessary changes.  
   Refactoring (e.g., variable renaming or other code improvements) is **not** allowed unless explicitly requested.
+- Include a “Requirement” section in the pull-request description.
 
 ## Documentation
 - Write all documentation, code comments, and branch names in **English**.  
