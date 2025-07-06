@@ -16,7 +16,10 @@ class NavigatorNode(Node):
         self.weights = [0.5, 0.3, 0.2]         # Weights for each scan line
         self.image_width = 640                 # Width of the image
         self.operation_gain = 0.005            # Gain for deviation-to-angular conversion
-        self.max_linear = 0.1                  # Max linear velocity [m/s]
+        # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
+        # With 28 mm wheel radius, this is about 0.62 m/s
+        self.min_linear = 0.05                 # Min linear velocity [m/s]
+        self.max_linear = 0.6                  # Max linear velocity [m/s]
         self.max_angular = 1.0                 # Max angular velocity [rad/s]
 
         self.bridge = CvBridge()
@@ -56,9 +59,15 @@ class NavigatorNode(Node):
         deviation = deviation_sum / total_weight
 
         # Compute angular velocity using proportional control
-        angular = np.clip(-deviation * self.operation_gain, -
-                          self.max_angular, self.max_angular)
-        linear = self.max_linear
+        angular = np.clip(
+            -deviation * self.operation_gain, -self.max_angular, self.max_angular
+        )
+
+        # Scale linear velocity based on the magnitude of the deviation
+        norm_dev = min(abs(deviation) / (self.image_width / 2), 1.0)
+        linear = self.max_linear - (
+            self.max_linear - self.min_linear
+        ) * norm_dev
 
         # Create and publish Twist message
         cmd = Twist()
