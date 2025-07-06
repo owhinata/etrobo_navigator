@@ -17,10 +17,12 @@ class NavigatorNode(Node):
         self.image_width = 640                 # Width of the image
         self.operation_gain = 0.005            # Gain for deviation-to-angular conversion
         # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
-        # With 28 mm wheel radius, this is about 0.62 m/s
-        self.min_linear = 0.05                 # Min linear velocity [m/s]
-        self.max_linear = 0.6                  # Max linear velocity [m/s]
+        # With 28 mm wheel radius, the theoretical max is about 0.62 m/s
+        self.min_linear = 0.1                  # Min linear velocity [m/s]
+        self.max_linear = 0.4                  # Max linear velocity [m/s]
         self.max_angular = 1.0                 # Max angular velocity [rad/s]
+        self.alpha = 0.7                       # Low-pass filter coefficient
+        self.prev_linear = 0.1                 # Previous linear velocity
 
         self.bridge = CvBridge()
 
@@ -63,11 +65,15 @@ class NavigatorNode(Node):
             -deviation * self.operation_gain, -self.max_angular, self.max_angular
         )
 
-        # Scale linear velocity based on the magnitude of the deviation
-        norm_dev = min(abs(deviation) / (self.image_width / 2), 1.0)
-        linear = self.max_linear - (
+        # Determine linear velocity based on angular velocity
+        norm_ang = min(abs(angular) / self.max_angular, 1.0)
+        new_linear = self.max_linear - (
             self.max_linear - self.min_linear
-        ) * norm_dev
+        ) * norm_ang
+
+        # Apply low-pass filter for smoother speed changes
+        linear = self.alpha * self.prev_linear + (1.0 - self.alpha) * new_linear
+        self.prev_linear = linear
 
         # Create and publish Twist message
         cmd = Twist()

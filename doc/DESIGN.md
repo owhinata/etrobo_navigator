@@ -11,8 +11,8 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 2. For each predefined scan line in the image, find the white pixels and compute their average x position.
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
-   The linear velocity is scaled based on the magnitude of the deviation
-   (curvature).
+   The linear velocity is scaled using the current angular velocity and
+   smoothed by a low-pass filter.
 5. Publish the resulting `Twist`.
 
 ## Parameters
@@ -23,4 +23,5 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 - `min_linear`: minimum linear velocity.
 - `max_linear`: maximum linear velocity.
 - `max_angular`: maximum angular velocity.
+- `alpha`: coefficient for the low-pass filter used on linear velocity.
 
