@@ -12,8 +12,14 @@ class NavigatorNode(Node):
         super().__init__('navigator_node')
 
         # --- Parameters ---
-        self.scan_lines = [420, 400, 380]      # Y-coordinates of scan lines
-        self.weights = [0.5, 0.3, 0.2]         # Weights for each scan line
+        # Y-coordinates of scan lines distributed vertically
+        self.scan_lines = [  # closer lines have higher priority
+            300, 320, 340, 360, 380, 400
+        ]
+        # Weights biased toward the lower part of the image (sum to 1.0)
+        self.weights = [
+            0.1, 0.1, 0.15, 0.2, 0.25, 0.2
+        ]
         self.image_width = 640                 # Width of the image
         self.operation_gain = 0.005            # Gain for deviation-to-angular conversion
         # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
