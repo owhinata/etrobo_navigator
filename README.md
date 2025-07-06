@@ -12,7 +12,7 @@ For simulation you can use [etrobo_simulator](https://github.com/owhinata/etrobo
 
 ## Build
 ```bash
-colcon build --packages-select etrobo_navigator
+colcon build --symlink-install --packages-select etrobo_navigator
 ```
 
 ## Run
