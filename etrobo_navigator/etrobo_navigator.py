@@ -43,11 +43,11 @@ class NavigatorNode(Node):
         self.declare_parameter('blue_scanlines_required', 2)
         self.declare_parameter('blue_detect_frames_threshold', 3)
         self.declare_parameter('main_line_lock_duration', 10)
-        self.blue_lower = np.array(
-            self.get_parameter('blue_lower').value, dtype=np.uint8
+        self.blue_lower = tuple(
+            int(v) for v in self.get_parameter('blue_lower').value
         )
-        self.blue_upper = np.array(
-            self.get_parameter('blue_upper').value, dtype=np.uint8
+        self.blue_upper = tuple(
+            int(v) for v in self.get_parameter('blue_upper').value
         )
         self.blue_scanlines_required = self.get_parameter(
             'blue_scanlines_required'
