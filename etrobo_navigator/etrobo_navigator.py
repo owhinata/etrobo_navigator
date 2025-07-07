@@ -37,6 +37,33 @@ class NavigatorNode(Node):
         self.declare_parameter('debug', False)
         self.debug = self.get_parameter('debug').value
 
+        # Parameters for blue line detection and switching
+        self.declare_parameter('blue_lower', [100, 100, 50])
+        self.declare_parameter('blue_upper', [130, 255, 255])
+        self.declare_parameter('blue_scanlines_required', 2)
+        self.declare_parameter('blue_detect_frames_threshold', 3)
+        self.declare_parameter('main_line_lock_duration', 10)
+        self.blue_lower = np.array(
+            self.get_parameter('blue_lower').value, dtype=np.uint8
+        )
+        self.blue_upper = np.array(
+            self.get_parameter('blue_upper').value, dtype=np.uint8
+        )
+        self.blue_scanlines_required = self.get_parameter(
+            'blue_scanlines_required'
+        ).value
+        self.blue_detect_frames_threshold = self.get_parameter(
+            'blue_detect_frames_threshold'
+        ).value
+        self.main_line_lock_duration = self.get_parameter(
+            'main_line_lock_duration'
+        ).value
+
+        # State variables for branching logic
+        self.main_line_side = 'left'
+        self.blue_detect_counter = 0
+        self.lock_counter = 0
+
         # --- Publisher and Subscriber ---
         self.sub = self.create_subscription(
             Image, '/camera_top/camera_top/image_raw', self.image_callback, 10)
@@ -47,6 +74,7 @@ class NavigatorNode(Node):
     def image_callback(self, msg):
         # Convert ROS image to OpenCV format
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
 
         # Thresholding to extract dark line (invert: dark becomes white)
@@ -58,10 +86,14 @@ class NavigatorNode(Node):
         cx_list = []
         debug_info = []  # (y position, center x or None)
         target_cx = self.prev_cx if self.prev_cx is not None else width // 2
+        blue_scan_count = 0
 
         for ratio, w in zip(self.scan_lines, self.weights):
             y = int(ratio * height)
             row = binary[y, :]
+            hsv_row = hsv[y, :]
+            if np.any(cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)):
+                blue_scan_count += 1
 
             indices = np.where(row == 255)[0]
             if len(indices) > 0:
@@ -76,10 +108,14 @@ class NavigatorNode(Node):
                     width_blob = blob[-1] - blob[0] + 1
                     candidates.append((cx, width_blob))
 
-                # Choose the blob closest to the previously detected position
-                chosen_cx, _ = min(
-                    candidates, key=lambda c: abs(c[0] - target_cx)
-                )
+                if self.main_line_side == 'left':
+                    chosen_cx, _ = min(candidates, key=lambda c: c[0])
+                elif self.main_line_side == 'right':
+                    chosen_cx, _ = max(candidates, key=lambda c: c[0])
+                else:
+                    chosen_cx, _ = min(
+                        candidates, key=lambda c: abs(c[0] - target_cx)
+                    )
                 cx_list.append((chosen_cx, w))
                 debug_info.append((y, chosen_cx))
             else:
@@ -87,12 +123,39 @@ class NavigatorNode(Node):
 
         confidence = len(cx_list) / len(self.scan_lines)
 
+        if blue_scan_count >= self.blue_scanlines_required:
+            self.blue_detect_counter += 1
+        else:
+            self.blue_detect_counter = 0
+
+        if self.lock_counter > 0:
+            self.lock_counter -= 1
+
+        if (
+            self.blue_detect_counter >= self.blue_detect_frames_threshold
+            and self.lock_counter == 0
+        ):
+            self.main_line_side = (
+                'right' if self.main_line_side == 'left' else 'left'
+            )
+            self.lock_counter = self.main_line_lock_duration
+            self.blue_detect_counter = 0
+            self.get_logger().info(
+                f'Switched main line to {self.main_line_side}'
+            )
+
+        extra_text = [
+            f"Blue lines: {blue_scan_count} ({self.blue_detect_counter})",
+            f"Main line: {self.main_line_side}, lock: {self.lock_counter}",
+        ]
+
         if len(cx_list) == 0:
             if self.debug:
                 self._show_debug(
                     cv_image,
                     debug_info,
                     message="No line detected",
+                    extra_text=extra_text,
                 )
             self.get_logger().warn("No line detected.")
             return
@@ -137,6 +200,7 @@ class NavigatorNode(Node):
                 deviation=deviation,
                 angular=angular,
                 confidence=confidence,
+                extra_text=extra_text,
             )
 
     def _show_debug(
@@ -147,6 +211,7 @@ class NavigatorNode(Node):
         angular: float | None = None,
         confidence: float | None = None,
         message: str | None = None,
+        extra_text: list[str] | None = None,
     ) -> None:
         """Draw debug information on the image and display it."""
         debug_image = image.copy()
@@ -214,6 +279,20 @@ class NavigatorNode(Node):
                 1,
                 cv2.LINE_AA,
             )
+            if extra_text:
+                base_y = 90
+                for line in extra_text:
+                    cv2.putText(
+                        debug_image,
+                        line,
+                        (10, base_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    base_y += 20
 
         cv2.imshow("debug", debug_image)
         cv2.waitKey(1)

@@ -11,11 +11,15 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 2. For each predefined scan line, detect connected white pixel blobs.
    Select the blob whose center is closest to the previously detected line
    position (or the image center if none is available).
-3. Calculate the weighted deviation of these center positions from the image center.
-4. Convert this deviation into an angular velocity using a proportional gain.
+3. Each scan line is also checked for blue pixels using HSV thresholding.
+   When a sufficient number of lines contain blue over consecutive frames,
+   the follower switches between the leftmost and rightmost line and locks
+   this choice for several frames.
+4. Calculate the weighted deviation of these center positions from the image center.
+5. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
    smoothed by a low-pass filter.
-5. Publish the resulting `Twist`.
+6. Publish the resulting `Twist`.
 
 ## Parameters
 - `scan_lines`: list of normalized y positions (ratio of image height) used for line detection.
@@ -26,6 +30,10 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 - `max_angular`: maximum angular velocity.
 - `alpha`: coefficient for the low-pass filter used on linear velocity.
 - `debug`: enable OpenCV visualization when set to `true`.
+- `blue_lower` / `blue_upper`: HSV range used for blue detection.
+- `blue_scanlines_required`: number of scan lines that must detect blue in one frame.
+- `blue_detect_frames_threshold`: consecutive frame count to confirm a branch.
+- `main_line_lock_duration`: frames to lock the selected line after switching.
 
 The node retrieves the image width and height from each received frame, so it can adapt to different camera resolutions.
 
