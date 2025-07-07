@@ -29,6 +29,7 @@ class NavigatorNode(Node):
         self.max_angular = 0.6                 # Max angular velocity [rad/s]
         self.alpha = 0.7                       # Low-pass filter coefficient
         self.prev_linear = 0.1                 # Previous linear velocity
+        self.prev_cx: float | None = None      # Previous line center
 
         self.bridge = CvBridge()
 
@@ -56,14 +57,31 @@ class NavigatorNode(Node):
         # Process each scan line and collect debug info
         cx_list = []
         debug_info = []  # (y position, center x or None)
+        target_cx = self.prev_cx if self.prev_cx is not None else width // 2
+
         for ratio, w in zip(self.scan_lines, self.weights):
             y = int(ratio * height)
             row = binary[y, :]
+
             indices = np.where(row == 255)[0]
             if len(indices) > 0:
-                cx = int(np.mean(indices))
-                cx_list.append((cx, w))
-                debug_info.append((y, cx))
+                # Split indices into connected components
+                splits = np.where(np.diff(indices) > 1)[0] + 1
+                blobs = np.split(indices, splits)
+
+                # Find center of each blob
+                candidates = []
+                for blob in blobs:
+                    cx = int(np.mean(blob))
+                    width_blob = blob[-1] - blob[0] + 1
+                    candidates.append((cx, width_blob))
+
+                # Choose the blob closest to the previously detected position
+                chosen_cx, _ = min(
+                    candidates, key=lambda c: abs(c[0] - target_cx)
+                )
+                cx_list.append((chosen_cx, w))
+                debug_info.append((y, chosen_cx))
             else:
                 debug_info.append((y, None))
 
@@ -84,6 +102,9 @@ class NavigatorNode(Node):
                             * w for cx, w in cx_list)
         total_weight = sum(w for _, w in cx_list)
         deviation = deviation_sum / total_weight
+
+        # Update the stored center using a weighted average
+        self.prev_cx = sum(cx * w for cx, w in cx_list) / total_weight
 
         # Compute angular velocity using proportional control
         angular = np.clip(
