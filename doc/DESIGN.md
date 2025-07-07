@@ -8,7 +8,9 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 
 ## Algorithm
 1. Convert the input image to grayscale and apply a binary threshold so the dark line appears white.
-2. For each predefined scan line in the image, find the white pixels and compute their average x position.
+2. For each predefined scan line, detect connected white pixel blobs.
+   Select the blob whose center is closest to the previously detected line
+   position (or the image center if none is available).
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
