@@ -34,7 +34,8 @@ class NavigatorNode(Node):
         self.bridge = CvBridge()
 
         # --- Scan line state parameters ---
-        self.BLUE_PIXEL_THRESHOLD = 100
+        self.BLUE_PIXEL_THRESHOLD = 20
+        self.BLUE_RATIO_THRESHOLD = 0.10
         self.BLUE_TO_BLACK_HOLD = 10
         self.blue_lower = np.array([90, 100, 50], dtype=np.uint8)
         self.blue_upper = np.array([130, 255, 255], dtype=np.uint8)
@@ -65,7 +66,7 @@ class NavigatorNode(Node):
 
         # Process each scan line and collect debug info
         cx_list = []
-        debug_info = []  # (y position, center x or None, state)
+        debug_info = []  # (y position, center x or None, state, blue_count, blue_ratio)
         target_cx = self.prev_cx if self.prev_cx is not None else width // 2
 
         for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
@@ -75,7 +76,11 @@ class NavigatorNode(Node):
 
             blue_mask = cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)
             blue_count = int(cv2.countNonZero(blue_mask))
-            blue_present = blue_count > self.BLUE_PIXEL_THRESHOLD
+            blue_ratio = blue_count / width
+            blue_present = (
+                blue_count > self.BLUE_PIXEL_THRESHOLD
+                or blue_ratio >= self.BLUE_RATIO_THRESHOLD
+            )
 
             indices = np.where(row == 255)[0]
             black_present = len(indices) > 0
@@ -113,9 +118,9 @@ class NavigatorNode(Node):
                     candidates, key=lambda c: abs(c[0] - target_cx)
                 )
                 cx_list.append((chosen_cx, w))
-                debug_info.append((y, chosen_cx, state))
+                debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
             else:
-                debug_info.append((y, None, state))
+                debug_info.append((y, None, state, blue_count, blue_ratio))
 
         confidence = len(cx_list) / len(self.scan_lines)
 
@@ -182,12 +187,12 @@ class NavigatorNode(Node):
     ) -> None:
         """Draw debug information on the image and display it.
 
-        ``debug_info`` is a list of tuples ``(y, cx_or_none, state)``.
+        ``debug_info`` is a list of tuples ``(y, cx_or_none, state, blue_count, blue_ratio)``.
         """
         debug_image = image.copy()
         width = image.shape[1]
 
-        for y, cx, state in debug_info:
+        for y, cx, state, blue_count, blue_ratio in debug_info:
             cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
             if cx is not None:
                 cv2.circle(debug_image, (cx, y), 4, (0, 255, 0), -1)
@@ -213,6 +218,16 @@ class NavigatorNode(Node):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                debug_image,
+                f"bc={blue_count} ({blue_ratio:.2f})",
+                (width - 160, y + 15),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 0),
                 1,
                 cv2.LINE_AA,
             )
