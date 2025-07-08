@@ -36,8 +36,8 @@ class NavigatorNode(Node):
         # --- Scan line state parameters ---
         self.BLUE_PIXEL_THRESHOLD = 100
         self.BLUE_TO_BLACK_HOLD = 10
-        self.blue_lower = np.array([90, 100, 50])
-        self.blue_upper = np.array([130, 255, 255])
+        self.blue_lower = np.array([90, 100, 50], dtype=np.uint8)
+        self.blue_upper = np.array([130, 255, 255], dtype=np.uint8)
         self.sl_state = ["normal"] * len(self.scan_lines)
         self.sl_hold_counter = [0] * len(self.scan_lines)
 
@@ -71,7 +71,7 @@ class NavigatorNode(Node):
         for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
             y = int(ratio * height)
             row = binary[y, :]
-            hsv_row = hsv[y, :, :]
+            hsv_row = hsv[y:y + 1, :, :]
 
             blue_mask = cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)
             blue_count = int(cv2.countNonZero(blue_mask))
