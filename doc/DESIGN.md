@@ -11,6 +11,8 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 2. For each predefined scan line, detect connected white pixel blobs.
    Select the blob whose center is closest to the previously detected line
    position (or the image center if none is available).
+   Each scan line also tracks a small state machine to report if a blue area
+   temporarily occludes the line.
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
