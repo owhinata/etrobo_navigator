@@ -91,7 +91,7 @@ class NavigatorNode(Node):
         for ratio, w in zip(self.scan_lines, self.weights):
             y = int(ratio * height)
             row = binary[y, :]
-            hsv_row = hsv[y, :]
+            hsv_row = hsv[y:y + 1, :]
             if np.any(cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)):
                 blue_scan_count += 1
 
