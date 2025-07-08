@@ -36,11 +36,9 @@ class NavigatorNode(Node):
         # --- Scan line state parameters ---
         self.BLUE_PIXEL_THRESHOLD = 20
         self.BLUE_RATIO_THRESHOLD = 0.10
-        self.BLUE_TO_BLACK_HOLD = 10
         self.blue_lower = np.array([90, 100, 50], dtype=np.uint8)
         self.blue_upper = np.array([130, 255, 255], dtype=np.uint8)
         self.sl_state = ["normal"] * len(self.scan_lines)
-        self.sl_hold_counter = [0] * len(self.scan_lines)
 
         # Debug parameter to enable OpenCV visualization
         self.declare_parameter('debug', False)
@@ -85,7 +83,6 @@ class NavigatorNode(Node):
             indices = np.where(row == 255)[0]
             black_present = len(indices) > 0
             state = self.sl_state[i]
-            hold = self.sl_hold_counter[i]
 
             if state == "normal":
                 if blue_present:
@@ -93,14 +90,8 @@ class NavigatorNode(Node):
             elif state == "blue_detected":
                 if not blue_present and black_present:
                     state = "blue_to_black"
-                    hold = self.BLUE_TO_BLACK_HOLD
-            elif state == "blue_to_black":
-                hold -= 1
-                if hold <= 0:
-                    state = "normal"
 
             self.sl_state[i] = state
-            self.sl_hold_counter[i] = hold
             if len(indices) > 0:
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
