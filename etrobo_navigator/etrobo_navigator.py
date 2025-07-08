@@ -33,6 +33,14 @@ class NavigatorNode(Node):
 
         self.bridge = CvBridge()
 
+        # --- Scan line state parameters ---
+        self.BLUE_PIXEL_THRESHOLD = 100
+        self.BLUE_TO_BLACK_HOLD = 10
+        self.blue_lower = np.array([90, 100, 50])
+        self.blue_upper = np.array([130, 255, 255])
+        self.sl_state = ["normal"] * len(self.scan_lines)
+        self.sl_hold_counter = [0] * len(self.scan_lines)
+
         # Debug parameter to enable OpenCV visualization
         self.declare_parameter('debug', False)
         self.debug = self.get_parameter('debug').value
@@ -48,6 +56,7 @@ class NavigatorNode(Node):
         # Convert ROS image to OpenCV format
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
         # Thresholding to extract dark line (invert: dark becomes white)
         _, binary = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
@@ -56,14 +65,37 @@ class NavigatorNode(Node):
 
         # Process each scan line and collect debug info
         cx_list = []
-        debug_info = []  # (y position, center x or None)
+        debug_info = []  # (y position, center x or None, state)
         target_cx = self.prev_cx if self.prev_cx is not None else width // 2
 
-        for ratio, w in zip(self.scan_lines, self.weights):
+        for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
             y = int(ratio * height)
             row = binary[y, :]
+            hsv_row = hsv[y, :, :]
+
+            blue_mask = cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)
+            blue_count = int(cv2.countNonZero(blue_mask))
+            blue_present = blue_count > self.BLUE_PIXEL_THRESHOLD
 
             indices = np.where(row == 255)[0]
+            black_present = len(indices) > 0
+            state = self.sl_state[i]
+            hold = self.sl_hold_counter[i]
+
+            if state == "normal":
+                if blue_present:
+                    state = "blue_detected"
+            elif state == "blue_detected":
+                if not blue_present and black_present:
+                    state = "blue_to_black"
+                    hold = self.BLUE_TO_BLACK_HOLD
+            elif state == "blue_to_black":
+                hold -= 1
+                if hold <= 0:
+                    state = "normal"
+
+            self.sl_state[i] = state
+            self.sl_hold_counter[i] = hold
             if len(indices) > 0:
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
@@ -81,9 +113,9 @@ class NavigatorNode(Node):
                     candidates, key=lambda c: abs(c[0] - target_cx)
                 )
                 cx_list.append((chosen_cx, w))
-                debug_info.append((y, chosen_cx))
+                debug_info.append((y, chosen_cx, state))
             else:
-                debug_info.append((y, None))
+                debug_info.append((y, None, state))
 
         confidence = len(cx_list) / len(self.scan_lines)
 
@@ -148,11 +180,14 @@ class NavigatorNode(Node):
         confidence: float | None = None,
         message: str | None = None,
     ) -> None:
-        """Draw debug information on the image and display it."""
+        """Draw debug information on the image and display it.
+
+        ``debug_info`` is a list of tuples ``(y, cx_or_none, state)``.
+        """
         debug_image = image.copy()
         width = image.shape[1]
 
-        for y, cx in debug_info:
+        for y, cx, state in debug_info:
             cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
             if cx is not None:
                 cv2.circle(debug_image, (cx, y), 4, (0, 255, 0), -1)
@@ -171,6 +206,16 @@ class NavigatorNode(Node):
                     (0, 0, 255),
                     1,
                 )
+            cv2.putText(
+                debug_image,
+                state,
+                (10, y + 15),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
 
         if message:
             cv2.putText(
