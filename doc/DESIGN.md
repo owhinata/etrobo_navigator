@@ -12,9 +12,10 @@ The package exposes a single node `NavigatorNode` that converts camera images in
    Select the blob whose center is closest to the previously detected line
    position (or the image center if none is available).
 3. Each scan line is also checked for blue pixels using HSV thresholding.
-   When a sufficient number of lines contain blue over consecutive frames,
-   the follower switches between the leftmost and rightmost line and locks
-   this choice for several frames.
+   When enough lines contain blue over consecutive frames, the node enters a
+   "blue detected" state.
+   It waits until multiple blobs appear on the black line before switching the
+   main line and locking this choice for several frames.
 4. Calculate the weighted deviation of these center positions from the image center.
 5. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
@@ -34,6 +35,8 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 - `blue_scanlines_required`: number of scan lines that must detect blue in one frame.
 - `blue_detect_frames_threshold`: consecutive frame count to confirm a branch.
 - `main_line_lock_duration`: frames to lock the selected line after switching.
+- `multi_blob_scanlines_required`: scan lines with multiple blobs needed to
+  confirm a branch.
 
 The node retrieves the image width and height from each received frame, so it can adapt to different camera resolutions.
 

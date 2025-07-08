@@ -43,6 +43,7 @@ class NavigatorNode(Node):
         self.declare_parameter('blue_scanlines_required', 2)
         self.declare_parameter('blue_detect_frames_threshold', 3)
         self.declare_parameter('main_line_lock_duration', 10)
+        self.declare_parameter('multi_blob_scanlines_required', 2)
         self.blue_lower = tuple(
             int(v) for v in self.get_parameter('blue_lower').value
         )
@@ -58,11 +59,15 @@ class NavigatorNode(Node):
         self.main_line_lock_duration = self.get_parameter(
             'main_line_lock_duration'
         ).value
+        self.multi_blob_scanlines_required = self.get_parameter(
+            'multi_blob_scanlines_required'
+        ).value
 
         # State variables for branching logic
         self.main_line_side = 'left'
         self.blue_detect_counter = 0
         self.lock_counter = 0
+        self.branching_state = 'idle'
 
         # --- Publisher and Subscriber ---
         self.sub = self.create_subscription(
@@ -87,6 +92,7 @@ class NavigatorNode(Node):
         debug_info = []  # (y position, center x or None)
         target_cx = self.prev_cx if self.prev_cx is not None else width // 2
         blue_scan_count = 0
+        multi_blob_scan_count = 0
 
         for ratio, w in zip(self.scan_lines, self.weights):
             y = int(ratio * height)
@@ -100,6 +106,9 @@ class NavigatorNode(Node):
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
                 blobs = np.split(indices, splits)
+
+                if len(blobs) > 1:
+                    multi_blob_scan_count += 1
 
                 # Find center of each blob
                 candidates = []
@@ -132,20 +141,27 @@ class NavigatorNode(Node):
             self.lock_counter -= 1
 
         if (
-            self.blue_detect_counter >= self.blue_detect_frames_threshold
+            self.branching_state == 'idle'
+            and self.blue_detect_counter >= self.blue_detect_frames_threshold
             and self.lock_counter == 0
         ):
-            self.main_line_side = (
-                'right' if self.main_line_side == 'left' else 'left'
-            )
-            self.lock_counter = self.main_line_lock_duration
+            self.branching_state = 'blue_detected_pending'
+            self.get_logger().info('Blue detected, waiting for branch')
             self.blue_detect_counter = 0
-            self.get_logger().info(
-                f'Switched main line to {self.main_line_side}'
-            )
+        elif self.branching_state == 'blue_detected_pending':
+            if multi_blob_scan_count >= self.multi_blob_scanlines_required:
+                self.main_line_side = (
+                    'right' if self.main_line_side == 'left' else 'left'
+                )
+                self.lock_counter = self.main_line_lock_duration
+                self.branching_state = 'idle'
+                self.get_logger().info(
+                    f'Branch detected, switched main line to {self.main_line_side}'
+                )
 
         extra_text = [
             f"Blue lines: {blue_scan_count} ({self.blue_detect_counter})",
+            f"State: {self.branching_state}",
             f"Main line: {self.main_line_side}, lock: {self.lock_counter}",
         ]
 
