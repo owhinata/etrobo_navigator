@@ -8,6 +8,7 @@ import numpy as np
 
 
 class NavigatorNode(Node):
+    MIN_BLOB_WIDTH = 5  # pixels
     def __init__(self):
         super().__init__('navigator_node')
 
@@ -66,6 +67,7 @@ class NavigatorNode(Node):
         cx_list = []
         debug_info = []  # (y position, center x or None, state, blue_count, blue_ratio)
         target_cx = self.prev_cx if self.prev_cx is not None else width // 2
+        branch_cx = None
 
         for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
             y = int(ratio * height)
@@ -83,6 +85,7 @@ class NavigatorNode(Node):
             indices = np.where(row == 255)[0]
             black_present = len(indices) > 0
             state = self.sl_state[i]
+            prev_state = state
 
             if state == "normal":
                 if blue_present:
@@ -91,7 +94,8 @@ class NavigatorNode(Node):
                 if not blue_present and black_present:
                     state = "blue_to_black"
 
-            self.sl_state[i] = state
+            transitioned = prev_state != "blue_to_black" and state == "blue_to_black"
+
             if len(indices) > 0:
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
@@ -104,14 +108,28 @@ class NavigatorNode(Node):
                     width_blob = blob[-1] - blob[0] + 1
                     candidates.append((cx, width_blob))
 
-                # Choose the blob closest to the previously detected position
-                chosen_cx, _ = min(
-                    candidates, key=lambda c: abs(c[0] - target_cx)
-                )
+                if transitioned:
+                    valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
+                    if valid:
+                        chosen_cx, _ = sorted(
+                            valid,
+                            key=lambda c: (abs(c[0] - target_cx), -c[0])
+                        )[0]
+                        branch_cx = chosen_cx
+                    else:
+                        chosen_cx, _ = min(
+                            candidates, key=lambda c: abs(c[0] - target_cx)
+                        )
+                    state = "normal"
+                else:
+                    chosen_cx, _ = min(
+                        candidates, key=lambda c: abs(c[0] - target_cx)
+                    )
                 cx_list.append((chosen_cx, w))
                 debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
             else:
                 debug_info.append((y, None, state, blue_count, blue_ratio))
+            self.sl_state[i] = state
 
         confidence = len(cx_list) / len(self.scan_lines)
 
@@ -132,7 +150,8 @@ class NavigatorNode(Node):
         deviation = deviation_sum / total_weight
 
         # Update the stored center using a weighted average
-        self.prev_cx = sum(cx * w for cx, w in cx_list) / total_weight
+        averaged_cx = sum(cx * w for cx, w in cx_list) / total_weight
+        self.prev_cx = branch_cx if branch_cx is not None else averaged_cx
 
         # Compute angular velocity using proportional control
         angular = np.clip(
