@@ -9,6 +9,7 @@ import numpy as np
 
 class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
+    BRANCH_CX_TOL = 25  # pixels
     def __init__(self):
         super().__init__('navigator_node')
 
@@ -66,7 +67,8 @@ class NavigatorNode(Node):
         # Process each scan line and collect debug info
         cx_list = []
         debug_info = []  # (y position, center x or None, state, blue_count, blue_ratio)
-        target_cx = self.prev_cx if self.prev_cx is not None else width // 2
+        base_cx = self.prev_cx if self.prev_cx is not None else width // 2
+        target_cx = base_cx
         branch_cx = None
 
         for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
@@ -96,6 +98,12 @@ class NavigatorNode(Node):
 
             transitioned = prev_state != "blue_to_black" and state == "blue_to_black"
 
+            # Skip processing after branching
+            if state == "branched":
+                debug_info.append((y, branch_cx, state, blue_count, blue_ratio))
+                self.sl_state[i] = state
+                continue
+
             if len(indices) > 0:
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
@@ -108,27 +116,42 @@ class NavigatorNode(Node):
                     width_blob = blob[-1] - blob[0] + 1
                     candidates.append((cx, width_blob))
 
-                if transitioned:
+                chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - target_cx))
+
+                if transitioned and branch_cx is None:
                     valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
                     if valid:
                         chosen_cx, _ = sorted(
                             valid,
-                            key=lambda c: (abs(c[0] - target_cx), -c[0])
+                            key=lambda c: (abs(c[0] - base_cx), -c[0])
                         )[0]
                         branch_cx = chosen_cx
+                        target_cx = branch_cx
+                        state = "branched"
+                        cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
+                        debug_info = [
+                            (info[0], branch_cx, info[2], info[3], info[4])
+                            for info in debug_info
+                        ]
+                        debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                        self.sl_state[i] = state
+                        continue
                     else:
-                        chosen_cx, _ = min(
-                            candidates, key=lambda c: abs(c[0] - target_cx)
-                        )
-                    state = "normal"
-                else:
-                    chosen_cx, _ = min(
-                        candidates, key=lambda c: abs(c[0] - target_cx)
-                    )
+                        state = "normal"
+
+                if branch_cx is not None and abs(chosen_cx - branch_cx) > self.BRANCH_CX_TOL:
+                    chosen_cx = branch_cx
+
                 cx_list.append((chosen_cx, w))
                 debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
             else:
-                debug_info.append((y, None, state, blue_count, blue_ratio))
+                if branch_cx is not None:
+                    chosen_cx = branch_cx
+                    cx_list.append((chosen_cx, w))
+                    debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                else:
+                    debug_info.append((y, None, state, blue_count, blue_ratio))
+
             self.sl_state[i] = state
 
         confidence = len(cx_list) / len(self.scan_lines)
