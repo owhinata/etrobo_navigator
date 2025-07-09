@@ -14,9 +14,11 @@ The package exposes a single node `NavigatorNode` that converts camera images in
    When the state machine transitions from `blue_detected` to `blue_to_black`,
    blobs narrower than `MIN_BLOB_WIDTH` (5 px) are ignored and the remaining
    blobs are ranked by distance to the previous center (ties prefer the right
-   blob). The chosen center is then stored so subsequent frames follow the new
-   branch. Each scan line also tracks a small state machine to report if a blue
-   area temporarily occludes the line.
+   blob). The first scan line to select a branch enters a terminal `branched`
+   state and its center is not used for averaging. The chosen center overrides
+   all scan lines for that frame and lines whose detected blob is farther than
+   `BRANCH_CX_TOL` (25 px) adopt this branch center. Each scan line also tracks
+   a small state machine to report if a blue area temporarily occludes the line.
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
