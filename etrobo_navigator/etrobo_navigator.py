@@ -98,12 +98,6 @@ class NavigatorNode(Node):
 
             transitioned = prev_state != "blue_to_black" and state == "blue_to_black"
 
-            # Skip processing after branching
-            if state == "branched":
-                debug_info.append((y, branch_cx, state, blue_count, blue_ratio))
-                self.sl_state[i] = state
-                continue
-
             if len(indices) > 0:
                 # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
@@ -127,15 +121,12 @@ class NavigatorNode(Node):
                         )[0]
                         branch_cx = chosen_cx
                         target_cx = branch_cx
-                        state = "branched"
                         cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
                         debug_info = [
                             (info[0], branch_cx, info[2], info[3], info[4])
                             for info in debug_info
                         ]
-                        debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
-                        self.sl_state[i] = state
-                        continue
+                        state = "normal"
                     else:
                         state = "normal"
 
