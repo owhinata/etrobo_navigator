@@ -17,9 +17,11 @@ The package exposes a single node `NavigatorNode` that converts camera images in
    blob). If a valid blob is chosen, the scan line immediately returns to
    `normal` and the selected center overrides all scan lines for that frame.
    Lines whose detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt this
-   branch center. Each scan line tracks a small state machine (`normal`,
-   `blue_detected`, `blue_to_black`) to report if a blue area temporarily
-   occludes the line.
+   branch center. While a scan line is in `blue_detected` or `blue_to_black`,
+   its chosen center immediately replaces the reference center for the next
+   lines so the blob ranking relies on the latest estimate. Each scan line
+   tracks a small state machine (`normal`, `blue_detected`, `blue_to_black`)
+   to report if a blue area temporarily occludes the line.
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
