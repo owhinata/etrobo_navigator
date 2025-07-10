@@ -112,6 +112,10 @@ class NavigatorNode(Node):
 
                 chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - target_cx))
 
+                if state in ("blue_detected", "blue_to_black") and branch_cx is None:
+                    base_cx = chosen_cx
+                    target_cx = base_cx
+
                 if transitioned and branch_cx is None:
                     valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
                     if valid:
