@@ -57,31 +57,57 @@ class NavigatorNode(Node):
         self.get_logger().info("NavigatorNode started. Waiting for camera images...")
 
     def image_callback(self, msg):
-        # Convert ROS image to OpenCV format
+        """Process incoming camera image and publish velocity commands."""
+        cv_image, binary, hsv = self._preprocess(msg)
+
+        cx_list, debug_info, branch_cx = self._process_scan_lines(binary, hsv)
+        if not cx_list:
+            return self._handle_no_line(cv_image, debug_info)
+
+        deviation, confidence, averaged_cx = self._compute_velocity_params(
+            cx_list, binary.shape[1]
+        )
+        self._update_prev_cx(branch_cx, averaged_cx)
+
+        linear, angular = self._compute_command(deviation)
+        self._publish_cmd(linear, angular)
+
+        if self.debug:
+            self._show_debug(
+                cv_image,
+                debug_info,
+                deviation=deviation,
+                angular=angular,
+                confidence=confidence,
+            )
+
+    def _preprocess(self, msg):
+        """Convert ROS Image message to OpenCV binary and HSV images."""
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-
-        # Thresholding to extract dark line (invert: dark becomes white)
         _, binary = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
+        return cv_image, binary, hsv
 
+    def _process_scan_lines(self, binary, hsv):
+        """Detect line positions on scan lines, handling branch logic."""
         height, width = binary.shape[:2]
-
-        # Process each scan line and collect debug info
         cx_list = []
-        debug_info = []  # (y position, center x or None, state, blue_count, blue_ratio)
+        debug_info = []
         base_cx = self.prev_cx if self.prev_cx is not None else width // 2
         branch_cx = None
-
-        for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
+        for i, (ratio, weight) in enumerate(zip(self.scan_lines, self.weights)):
             # Lock branch center during selection phase
             if self.pending_branch > 0 and branch_cx is not None:
                 self.prev_cx = branch_cx
+
             y = int(ratio * height)
             row = binary[y, :]
-            hsv_row = hsv[y:y + 1, :, :]
+            hsv_row = hsv[y : y + 1, :, :]
 
-            blue_mask = cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)
+            blue_mask = cv2.inRange(
+                hsv_row, self.blue_lower, self.blue_upper
+            )
             blue_count = int(cv2.countNonZero(blue_mask))
             blue_ratio = blue_count / width
             blue_present = (
@@ -92,130 +118,114 @@ class NavigatorNode(Node):
             indices = np.where(row == 255)[0]
             black_present = len(indices) > 0
             state = self.sl_state[i]
-            prev_state = state
 
-            if state == "normal":
-                if blue_present:
-                    state = "blue_detected"
-            elif state == "blue_detected":
-                if not blue_present and black_present:
-                    state = "blue_to_black"
-
-            # Continuously check for a branch while in blue_to_black
+            if state == "normal" and blue_present:
+                state = "blue_detected"
+            elif state == "blue_detected" and not blue_present and black_present:
+                state = "blue_to_black"
 
             if len(indices) > 0:
-                # Split indices into connected components
                 splits = np.where(np.diff(indices) > 1)[0] + 1
                 blobs = np.split(indices, splits)
 
-                # Find center of each blob
-                candidates = []
-                for blob in blobs:
-                    cx = int(np.mean(blob))
-                    width_blob = blob[-1] - blob[0] + 1
-                    candidates.append((cx, width_blob))
-
-                # Select the blob closest to current target (base or branch)
+                candidates = [
+                    (int(np.mean(blob)), blob[-1] - blob[0] + 1)
+                    for blob in blobs
+                ]
                 current_target = branch_cx if branch_cx is not None else base_cx
-                chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - current_target))
+                chosen_cx, _ = min(
+                    candidates, key=lambda c: abs(c[0] - current_target)
+                )
 
                 if state == "blue_to_black" and branch_cx is None:
-                    # only branch when at least two nearby blobs are detected
                     near = [
-                        c for c in candidates
+                        c
+                        for c in candidates
                         if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
                         and c[1] >= self.MIN_BLOB_WIDTH
                     ]
                     if len(near) >= 2:
-                        # choose the rightmost valid branch
                         chosen_cx, _ = max(near, key=lambda c: c[0])
                         branch_cx = chosen_cx
-                        cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
+                        cx_list = [
+                            (branch_cx, w_prev) for (_, w_prev) in cx_list
+                        ]
                         debug_info = [
                             (info[0], branch_cx, info[2], info[3], info[4])
                             for info in debug_info
                         ]
                         state = "normal"
-                        # one scan-line has selected the branch
                         self.pending_branch -= 1
 
-
-                cx_list.append((chosen_cx, w))
-                debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                cx_list.append((chosen_cx, weight))
+                debug_info.append(
+                    (y, chosen_cx, state, blue_count, blue_ratio)
+                )
             else:
                 if branch_cx is not None:
-                    chosen_cx = branch_cx
-                    cx_list.append((chosen_cx, w))
-                    debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                    cx_list.append((branch_cx, weight))
+                    debug_info.append(
+                        (y, branch_cx, state, blue_count, blue_ratio)
+                    )
                 else:
                     debug_info.append((y, None, state, blue_count, blue_ratio))
 
             self.sl_state[i] = state
 
+        return cx_list, debug_info, branch_cx
+
+    def _compute_velocity_params(self, cx_list, width):
+        """Compute deviation, confidence, and averaged center from cx_list."""
         confidence = len(cx_list) / len(self.scan_lines)
-
-        if len(cx_list) == 0:
-            if self.debug:
-                self._show_debug(
-                    cv_image,
-                    debug_info,
-                    message="No line detected",
-                )
-            self.get_logger().warn("No line detected.")
-            return
-
-        # Compute weighted deviation from image center
-        deviation_sum = sum((cx - width // 2)
-                            * w for cx, w in cx_list)
         total_weight = sum(w for _, w in cx_list)
-        deviation = deviation_sum / total_weight
-
-        # Update the stored center using a weighted average
+        deviation = sum((cx - width // 2) * w for cx, w in cx_list) / total_weight
         averaged_cx = sum(cx * w for cx, w in cx_list) / total_weight
-        # Update prev_cx and reset pending_branch when all scan-lines have decided
+        return deviation, confidence, averaged_cx
+
+    def _update_prev_cx(self, branch_cx, averaged_cx):
+        """Update prev_cx and reset pending_branch when needed."""
         if branch_cx is None:
             self.prev_cx = averaged_cx
         else:
             if self.pending_branch == 0:
-                # all scan-lines have completed branch selection
                 self.prev_cx = branch_cx
                 self.pending_branch = len(self.scan_lines)
             else:
-                # still waiting for other scan-lines, keep branch locked
                 self.prev_cx = branch_cx
 
-        # Compute angular velocity using proportional control
+    def _compute_command(self, deviation):
+        """Compute linear and angular velocities from deviation."""
         angular = np.clip(
-            -deviation * self.operation_gain, -self.max_angular, self.max_angular
+            -deviation * self.operation_gain,
+            -self.max_angular,
+            self.max_angular,
         )
-
-        # Determine linear velocity based on angular velocity
         norm_ang = min(abs(angular) / self.max_angular, 1.0)
         new_linear = self.max_linear - (
             self.max_linear - self.min_linear
         ) * norm_ang
-
-        # Apply low-pass filter for smoother speed changes
-        linear = self.alpha * self.prev_linear + (1.0 - self.alpha) * new_linear
+        linear = self.alpha * self.prev_linear + (
+            1.0 - self.alpha
+        ) * new_linear
         self.prev_linear = linear
+        return linear, angular
 
-        # Create and publish Twist message
+    def _publish_cmd(self, linear, angular):
+        """Publish Twist command and log it."""
         cmd = Twist()
         cmd.linear.x = linear
         cmd.angular.z = angular
         self.pub.publish(cmd)
-
         self.get_logger().info(
-            f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}")
+            f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}"
+        )
 
+    def _handle_no_line(self, cv_image, debug_info):
+        """Handle case when no line is detected."""
         if self.debug:
-            self._show_debug(
-                cv_image,
-                debug_info,
-                deviation=deviation,
-                angular=angular,
-                confidence=confidence,
-            )
+            self._show_debug(cv_image, debug_info, message="No line detected")
+        self.get_logger().warn("No line detected.")
+        return
 
     def _show_debug(
         self,
