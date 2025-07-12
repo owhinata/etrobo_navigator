@@ -80,10 +80,10 @@ class NavigatorNode(Node):
             if candidates:
                 for start, w, cx in candidates:
                     mark = '*' if chosen == cx else ''
-                    entries.append(f"{start},{w},{cx},{state}{mark}")
+                    entries.append(f"{start},{w},{state}{mark}")
             else:
                 # no candidate: output placeholder
-                entries.append(f"-,-,{chosen},{state}")
+                entries.append(f"-,-,{state}")
         self.get_logger().info(" ".join(entries))
 
         if self.debug:
