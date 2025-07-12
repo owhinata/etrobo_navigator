@@ -116,13 +116,13 @@ class NavigatorNode(Node):
     ):
         """Process a single scan line and update cx_list, debug_info, and branch selection."""
         # prepare scan line
-        y, row, hsv_row = _compute_scanline_data(binary, hsv, ratio)
+        y, row, hsv_row = self._compute_scanline_data(ratio, binary, hsv)
         blue_count, blue_ratio, blue_present = self._analyze_blue(hsv_row, row.size)
         indices = np.where(row == 255)[0]
         state = self._update_state(self.sl_state[i], blue_present, bool(indices.size))
 
         if indices.size:
-            candidates = _detect_blob_centers(indices)
+            candidates = self._detect_blob_centers(indices)
             chosen_cx, branch_cx, state = self._handle_branch(
                 candidates, state, base_cx, branch_cx, cx_list, debug_info,
                 y, weight, blue_count, blue_ratio
@@ -135,13 +135,13 @@ class NavigatorNode(Node):
         self.sl_state[i] = state
         return branch_cx
 
-    def _compute_scanline_data(ratio, binary, hsv):
+    def _compute_scanline_data(self, ratio, binary, hsv):
         """Return y-coordinate, binary row, and HSV row for a given scanline ratio."""
         height, width = binary.shape[:2]
         y = int(ratio * height)
         return y, binary[y, :], hsv[y : y + 1, :, :]
 
-    def _detect_blob_centers(indices: np.ndarray) -> list[tuple[int, int]]:
+    def _detect_blob_centers(self, indices: np.ndarray) -> list[tuple[int, int]]:
         """Split indices into connected blobs and return their center x and widths."""
         splits = np.where(np.diff(indices) > 1)[0] + 1
         blobs = np.split(indices, splits)
