@@ -128,10 +128,13 @@ class NavigatorNode(Node):
                 y, weight, blue_count, blue_ratio
             )
         else:
-            chosen_cx = branch_cx
-            debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+            if branch_cx is not None:
+                chosen_cx = branch_cx
+                debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                cx_list.append((chosen_cx, weight))
+            else:
+                debug_info.append((y, None, state, blue_count, blue_ratio))
 
-        cx_list.append((chosen_cx, weight))
         self.sl_state[i] = state
         return branch_cx
 
