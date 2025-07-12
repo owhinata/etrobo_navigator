@@ -202,7 +202,8 @@ class NavigatorNode(Node):
     ) -> tuple[int, int | None, str]:
         """Select blob center and handle branching logic, updating lists as needed."""
         target = branch_cx if branch_cx is not None else base_cx
-        chosen_cx, _, _ = min(candidates, key=lambda c: abs(c[2] - target))
+        # choose initial blob candidate center
+        _, _, chosen_cx = min(candidates, key=lambda c: abs(c[2] - target))
 
         if state == "blue_to_black" and branch_cx is None:
             near = [
