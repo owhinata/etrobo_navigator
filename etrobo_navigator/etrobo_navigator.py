@@ -96,7 +96,7 @@ class NavigatorNode(Node):
                 if not blue_present and black_present:
                     state = "blue_to_black"
 
-            transitioned = prev_state != "blue_to_black" and state == "blue_to_black"
+            # Continuously check for a branch while in blue_to_black
 
             if len(indices) > 0:
                 # Split indices into connected components
@@ -116,23 +116,22 @@ class NavigatorNode(Node):
                     base_cx = chosen_cx
                     target_cx = base_cx
 
-                if transitioned and branch_cx is None:
-                    valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
-                    if valid:
-                        chosen_cx, _ = sorted(
-                            valid,
-                            key=lambda c: (abs(c[0] - base_cx), -c[0])
-                        )[0]
-                        branch_cx = chosen_cx
-                        target_cx = branch_cx
-                        cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
-                        debug_info = [
-                            (info[0], branch_cx, info[2], info[3], info[4])
-                            for info in debug_info
-                        ]
-                        state = "normal"
-                    else:
-                        state = "normal"
+                if state == "blue_to_black" and branch_cx is None:
+                    if len(blobs) >= 2:
+                        valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
+                        if valid:
+                            chosen_cx, _ = sorted(
+                                valid,
+                                key=lambda c: (abs(c[0] - base_cx), -c[0])
+                            )[0]
+                            branch_cx = chosen_cx
+                            target_cx = branch_cx
+                            cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
+                            debug_info = [
+                                (info[0], branch_cx, info[2], info[3], info[4])
+                                for info in debug_info
+                            ]
+                            state = "normal"
 
                 if branch_cx is not None and abs(chosen_cx - branch_cx) > self.BRANCH_CX_TOL:
                     chosen_cx = branch_cx
