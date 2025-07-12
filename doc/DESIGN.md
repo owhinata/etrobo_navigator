@@ -11,17 +11,20 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 2. For each predefined scan line, detect connected white pixel blobs.
    Select the blob whose center is closest to the previously detected line
    position (or the image center if none is available).
-   When the state machine transitions from `blue_detected` to `blue_to_black`,
-   blobs narrower than `MIN_BLOB_WIDTH` (5 px) are ignored and the remaining
-   blobs are ranked by distance to the previous center (ties prefer the right
-   blob). If a valid blob is chosen, the scan line immediately returns to
-   `normal` and the selected center overrides all scan lines for that frame.
-   Lines whose detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt this
-   branch center. While a scan line is in `blue_detected` or `blue_to_black`,
-   its chosen center immediately replaces the reference center for the next
-   lines so the blob ranking relies on the latest estimate. Each scan line
-   tracks a small state machine (`normal`, `blue_detected`, `blue_to_black`)
-   to report if a blue area temporarily occludes the line.
+    While a scan line is in `blue_to_black`, each frame checks all detected
+    blobs to determine if a right-hand branch exists. A branch decision
+    requires at least two blobs. Blobs narrower than `MIN_BLOB_WIDTH` (5 px)
+    are ignored and the remaining blobs are ranked by distance to the previous
+    center (ties prefer the right blob). When a valid branch is chosen, the
+    scan line immediately returns to `normal` and the selected center overrides
+    all scan lines for that frame. If no branch is found, the scan line stays
+    in `blue_to_black` and will be checked again on the next frame. Lines whose
+    detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt this branch
+    center. While a scan line is in `blue_detected` or `blue_to_black`, its
+    chosen center immediately replaces the reference center for the next lines
+    so the blob ranking relies on the latest estimate. Each scan line tracks a
+    small state machine (`normal`, `blue_detected`, `blue_to_black`) to report
+    if a blue area temporarily occludes the line.
 3. Calculate the weighted deviation of these center positions from the image center.
 4. Convert this deviation into an angular velocity using a proportional gain.
    The linear velocity is scaled using the current angular velocity and
