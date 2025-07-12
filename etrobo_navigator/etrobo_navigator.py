@@ -127,6 +127,7 @@ class NavigatorNode(Node):
                 candidates, state, base_cx, branch_cx, cx_list, debug_info,
                 y, weight, blue_count, blue_ratio
             )
+            cx_list.append((chosen_cx, weight))
         else:
             if branch_cx is not None:
                 chosen_cx = branch_cx
