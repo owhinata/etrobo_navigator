@@ -10,6 +10,7 @@ import numpy as np
 class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
     BRANCH_CX_TOL = 25  # pixels
+    BRANCH_WINDOW = 40  # pixels (tune if needed)
     def __init__(self):
         super().__init__('navigator_node')
 
@@ -118,20 +119,27 @@ class NavigatorNode(Node):
 
                 if state == "blue_to_black" and branch_cx is None:
                     if len(blobs) >= 2:
-                        valid = [c for c in candidates if c[1] >= self.MIN_BLOB_WIDTH]
-                        if valid:
-                            chosen_cx, _ = sorted(
-                                valid,
-                                key=lambda c: (abs(c[0] - base_cx), -c[0])
-                            )[0]
-                            branch_cx = chosen_cx
-                            target_cx = branch_cx
-                            cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
-                            debug_info = [
-                                (info[0], branch_cx, info[2], info[3], info[4])
-                                for info in debug_info
-                            ]
-                            state = "normal"
+                        near = [
+                            c for c in candidates
+                            if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
+                            and c[1] >= self.MIN_BLOB_WIDTH
+                        ]
+
+                        if near:
+                            chosen_cx, _ = max(near, key=lambda c: c[0])
+                        else:
+                            chosen_cx, _ = min(
+                                candidates, key=lambda c: abs(c[0] - base_cx)
+                            )
+
+                        branch_cx = chosen_cx
+                        target_cx = branch_cx
+                        cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
+                        debug_info = [
+                            (info[0], branch_cx, info[2], info[3], info[4])
+                            for info in debug_info
+                        ]
+                        state = "normal"
 
                 if branch_cx is not None and abs(chosen_cx - branch_cx) > self.BRANCH_CX_TOL:
                     chosen_cx = branch_cx
