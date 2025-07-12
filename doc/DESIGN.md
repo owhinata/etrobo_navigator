@@ -14,13 +14,14 @@ The package exposes a single node `NavigatorNode` that converts camera images in
     While a scan line is in `blue_to_black`, each frame checks all detected
     blobs to determine if a right-hand branch exists. A branch decision
     requires at least two blobs. Blobs narrower than `MIN_BLOB_WIDTH` (5 px)
-    are ignored and the remaining blobs are ranked by distance to the previous
-    center (ties prefer the right blob). When a valid branch is chosen, the
-    scan line immediately returns to `normal` and the selected center overrides
-    all scan lines for that frame. If no branch is found, the scan line stays
-    in `blue_to_black` and will be checked again on the next frame. Lines whose
-    detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt this branch
-    center. While a scan line is in `blue_detected` or `blue_to_black`, its
+    are ignored. Those within `BRANCH_WINDOW` (40 px) of the previous center
+    are considered and the right-most among them is chosen. If no candidate
+    falls inside the window, the closest blob to the previous center is used.
+    When a valid branch is chosen, the scan line immediately returns to
+    `normal` and the selected center overrides all scan lines for that frame.
+    Lines whose detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt
+    this branch center. While a scan line is in `blue_detected` or
+    `blue_to_black`, its
     chosen center immediately replaces the reference center for the next lines
     so the blob ranking relies on the latest estimate. Each scan line tracks a
     small state machine (`normal`, `blue_detected`, `blue_to_black`) to report
