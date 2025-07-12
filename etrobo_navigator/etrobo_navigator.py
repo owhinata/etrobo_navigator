@@ -74,16 +74,15 @@ class NavigatorNode(Node):
         self._publish_cmd(linear, angular)
 
         # log per-scanline blob info: start,width,chosen_center,state
+        # compact per-scanline blob info: output all candidates and mark chosen
         entries: list[str] = []
-        for y, candidates, chosen, state in debug_info:
-            if candidates and chosen is not None:
+        for _, candidates, chosen, state in debug_info:
+            if candidates:
                 for start, w, cx in candidates:
-                    if cx == chosen:
-                        entries.append(f"{start},{w},{cx},{state}")
-                        break
-                else:
-                    entries.append(f"-,-,{chosen},{state}")
+                    mark = '*' if chosen == cx else ''
+                    entries.append(f"{start},{w},{cx},{state}{mark}")
             else:
+                # no candidate: output placeholder
                 entries.append(f"-,-,{chosen},{state}")
         self.get_logger().info(" ".join(entries))
 
