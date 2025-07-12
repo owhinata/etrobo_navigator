@@ -82,16 +82,20 @@ class NavigatorNode(Node):
         # log per-scanline blob info: start,width,chosen_center,state
         # compact per-scanline blob info: output all candidates and mark chosen
         entries: list[str] = []
-        # compact per-scanline blob info: output all candidates and mark chosen
+        # compact per-scanline blob info: one entry per scanline with state, blobs(list start,width)
         entries: list[str] = []
         for _, candidates, chosen, state in debug_info:
             abbr = _STATE_ABBR.get(state, state)
             if candidates:
+                parts = [abbr]
                 for start, w, cx in candidates:
-                    mark = '*' if chosen == cx else ''
-                    entries.append(f"{start},{w},{abbr}{mark}")
+                    if cx == chosen:
+                        parts.append(f"{start},{w}*")
+                    else:
+                        parts.append(f"{start},{w}")
+                entries.append(",".join(parts))
             else:
-                entries.append(f"-,-,{abbr}")
+                entries.append(f"{abbr},-,-")
         self.get_logger().info(" ".join(entries))
 
         if self.debug:
