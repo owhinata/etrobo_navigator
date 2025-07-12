@@ -211,13 +211,14 @@ class NavigatorNode(Node):
                 and c[1] >= self.MIN_BLOB_WIDTH
             ]
             if len(near) >= 2:
+                # choose the rightmost valid branch
                 _, _, cx2 = max(near, key=lambda c: c[2])
                 branch_cx = cx2
-                # retroactively update previous entries
+                # retroactively update previous entries with preserved candidates
                 cx_list[:] = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
                 debug_info[:] = [
-                    (info[0], info[1], branch_cx, info[3])
-                    for info in debug_info
+                    (y0, candidates0, branch_cx, state0)
+                    for (y0, candidates0, _, state0) in debug_info
                 ]
                 state = "normal"
                 self.pending_branch -= 1
