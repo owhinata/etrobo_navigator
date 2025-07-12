@@ -101,78 +101,82 @@ class NavigatorNode(Node):
             if self.pending_branch > 0 and branch_cx is not None:
                 self.prev_cx = branch_cx
 
-            y = int(ratio * height)
-            row = binary[y, :]
-            hsv_row = hsv[y : y + 1, :, :]
-
-            blue_mask = cv2.inRange(
-                hsv_row, self.blue_lower, self.blue_upper
+            branch_cx = self._process_scan_line(
+                i, ratio, weight, binary, hsv, base_cx, branch_cx,
+                cx_list, debug_info
             )
-            blue_count = int(cv2.countNonZero(blue_mask))
-            blue_ratio = blue_count / width
-            blue_present = (
-                blue_count > self.BLUE_PIXEL_THRESHOLD
-                or blue_ratio >= self.BLUE_RATIO_THRESHOLD
-            )
-
-            indices = np.where(row == 255)[0]
-            black_present = len(indices) > 0
-            state = self.sl_state[i]
-
-            if state == "normal" and blue_present:
-                state = "blue_detected"
-            elif state == "blue_detected" and not blue_present and black_present:
-                state = "blue_to_black"
-
-            if len(indices) > 0:
-                splits = np.where(np.diff(indices) > 1)[0] + 1
-                blobs = np.split(indices, splits)
-
-                candidates = [
-                    (int(np.mean(blob)), blob[-1] - blob[0] + 1)
-                    for blob in blobs
-                ]
-                current_target = branch_cx if branch_cx is not None else base_cx
-                chosen_cx, _ = min(
-                    candidates, key=lambda c: abs(c[0] - current_target)
-                )
-
-                if state == "blue_to_black" and branch_cx is None:
-                    near = [
-                        c
-                        for c in candidates
-                        if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
-                        and c[1] >= self.MIN_BLOB_WIDTH
-                    ]
-                    if len(near) >= 2:
-                        chosen_cx, _ = max(near, key=lambda c: c[0])
-                        branch_cx = chosen_cx
-                        cx_list = [
-                            (branch_cx, w_prev) for (_, w_prev) in cx_list
-                        ]
-                        debug_info = [
-                            (info[0], branch_cx, info[2], info[3], info[4])
-                            for info in debug_info
-                        ]
-                        state = "normal"
-                        self.pending_branch -= 1
-
-                cx_list.append((chosen_cx, weight))
-                debug_info.append(
-                    (y, chosen_cx, state, blue_count, blue_ratio)
-                )
-            else:
-                if branch_cx is not None:
-                    cx_list.append((branch_cx, weight))
-                    debug_info.append(
-                        (y, branch_cx, state, blue_count, blue_ratio)
-                    )
-                else:
-                    debug_info.append((y, None, state, blue_count, blue_ratio))
-
-            self.sl_state[i] = state
 
         return cx_list, debug_info, branch_cx
+
+    def _process_scan_line(
+        self, i, ratio, weight,
+        binary, hsv,
+        base_cx, branch_cx,
+        cx_list, debug_info
+    ):
+        """Process a single scan line and update cx_list, debug_info, and branch selection."""
+        height, width = binary.shape[:2]
+        y = int(ratio * height)
+        row = binary[y, :]
+        hsv_row = hsv[y : y + 1, :, :]
+
+        blue_mask = cv2.inRange(hsv_row, self.blue_lower, self.blue_upper)
+        blue_count = int(cv2.countNonZero(blue_mask))
+        blue_ratio = blue_count / width
+        blue_present = (
+            blue_count > self.BLUE_PIXEL_THRESHOLD
+            or blue_ratio >= self.BLUE_RATIO_THRESHOLD
+        )
+
+        indices = np.where(row == 255)[0]
+        black_present = len(indices) > 0
+        state = self.sl_state[i]
+
+        if state == "normal" and blue_present:
+            state = "blue_detected"
+        elif state == "blue_detected" and not blue_present and black_present:
+            state = "blue_to_black"
+
+        if len(indices) > 0:
+            splits = np.where(np.diff(indices) > 1)[0] + 1
+            blobs = np.split(indices, splits)
+
+            candidates = [
+                (int(np.mean(blob)), blob[-1] - blob[0] + 1)
+                for blob in blobs
+            ]
+            target = branch_cx if branch_cx is not None else base_cx
+            chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - target))
+
+            if state == "blue_to_black" and branch_cx is None:
+                near = [
+                    c for c in candidates
+                    if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
+                    and c[1] >= self.MIN_BLOB_WIDTH
+                ]
+                if len(near) >= 2:
+                    chosen_cx, _ = max(near, key=lambda c: c[0])
+                    branch_cx = chosen_cx
+                    # retroactively update previous entries
+                    cx_list[:] = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
+                    debug_info[:] = [
+                        (info[0], branch_cx, info[2], info[3], info[4])
+                        for info in debug_info
+                    ]
+                    state = "normal"
+                    self.pending_branch -= 1
+
+            cx_list.append((chosen_cx, weight))
+            debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+        else:
+            if branch_cx is not None:
+                cx_list.append((branch_cx, weight))
+                debug_info.append((y, branch_cx, state, blue_count, blue_ratio))
+            else:
+                debug_info.append((y, None, state, blue_count, blue_ratio))
+
+        self.sl_state[i] = state
+        return branch_cx
 
     def _compute_velocity_params(self, cx_list, width):
         """Compute deviation, confidence, and averaged center from cx_list."""
