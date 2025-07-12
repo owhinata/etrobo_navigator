@@ -18,7 +18,7 @@ For simulation:
   Refactoring (e.g., variable renaming or other code improvements) is **not** allowed unless explicitly requested.
 - The pull-request description **must include** the following sections:
   - **Requirement** – copy the task details **verbatim**
-  - **Summary**
+  - **Change Summary**
   - **Testing**
 
 ## Documentation
@@ -30,4 +30,4 @@ Run the following after making changes:
 
 ```bash
 colcon test --packages-select etrobo_simulator
-
+```
