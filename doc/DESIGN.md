@@ -19,8 +19,7 @@ The package exposes a single node `NavigatorNode` that converts camera images in
     falls inside the window, the closest blob to the previous center is used.
     When a valid branch is chosen, the scan line immediately returns to
     `normal` and the selected center overrides all scan lines for that frame.
-    Lines whose detected blob is farther than `BRANCH_CX_TOL` (25 px) adopt
-    this branch center. While a scan line is in `blue_detected` or
+    While a scan line is in `blue_detected` or
     `blue_to_black`, its
     chosen center immediately replaces the reference center for the next lines
     so the blob ranking relies on the latest estimate. Each scan line tracks a
@@ -43,4 +42,3 @@ The package exposes a single node `NavigatorNode` that converts camera images in
 - `debug`: enable OpenCV visualization when set to `true`.
 
 The node retrieves the image width and height from each received frame, so it can adapt to different camera resolutions.
-
