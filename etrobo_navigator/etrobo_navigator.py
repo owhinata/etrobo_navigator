@@ -42,6 +42,8 @@ class NavigatorNode(Node):
         self.blue_lower = np.array([90, 100, 50], dtype=np.uint8)
         self.blue_upper = np.array([130, 255, 255], dtype=np.uint8)
         self.sl_state = ["normal"] * len(self.scan_lines)
+        # Counter to lock branch selection until all scan-lines have decided
+        self.pending_branch = len(self.scan_lines)
 
         # Debug parameter to enable OpenCV visualization
         self.declare_parameter('debug', False)
@@ -69,10 +71,12 @@ class NavigatorNode(Node):
         cx_list = []
         debug_info = []  # (y position, center x or None, state, blue_count, blue_ratio)
         base_cx = self.prev_cx if self.prev_cx is not None else width // 2
-        target_cx = base_cx
         branch_cx = None
 
         for i, (ratio, w) in enumerate(zip(self.scan_lines, self.weights)):
+            # Lock branch center during selection phase
+            if self.pending_branch > 0 and branch_cx is not None:
+                self.prev_cx = branch_cx
             y = int(ratio * height)
             row = binary[y, :]
             hsv_row = hsv[y:y + 1, :, :]
@@ -111,38 +115,30 @@ class NavigatorNode(Node):
                     width_blob = blob[-1] - blob[0] + 1
                     candidates.append((cx, width_blob))
 
-                chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - target_cx))
-
-                if state in ("blue_detected", "blue_to_black") and branch_cx is None:
-                    base_cx = chosen_cx
-                    target_cx = base_cx
+                # Select the blob closest to current target (base or branch)
+                current_target = branch_cx if branch_cx is not None else base_cx
+                chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - current_target))
 
                 if state == "blue_to_black" and branch_cx is None:
-                    if len(blobs) >= 2:
-                        near = [
-                            c for c in candidates
-                            if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
-                            and c[1] >= self.MIN_BLOB_WIDTH
-                        ]
-
-                        if near:
-                            chosen_cx, _ = max(near, key=lambda c: c[0])
-                        else:
-                            chosen_cx, _ = min(
-                                candidates, key=lambda c: abs(c[0] - base_cx)
-                            )
-
+                    # only branch when at least two nearby blobs are detected
+                    near = [
+                        c for c in candidates
+                        if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
+                        and c[1] >= self.MIN_BLOB_WIDTH
+                    ]
+                    if len(near) >= 2:
+                        # choose the rightmost valid branch
+                        chosen_cx, _ = max(near, key=lambda c: c[0])
                         branch_cx = chosen_cx
-                        target_cx = branch_cx
                         cx_list = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
                         debug_info = [
                             (info[0], branch_cx, info[2], info[3], info[4])
                             for info in debug_info
                         ]
                         state = "normal"
+                        # one scan-line has selected the branch
+                        self.pending_branch -= 1
 
-                if branch_cx is not None and abs(chosen_cx - branch_cx) > self.BRANCH_CX_TOL:
-                    chosen_cx = branch_cx
 
                 cx_list.append((chosen_cx, w))
                 debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
@@ -176,7 +172,17 @@ class NavigatorNode(Node):
 
         # Update the stored center using a weighted average
         averaged_cx = sum(cx * w for cx, w in cx_list) / total_weight
-        self.prev_cx = branch_cx if branch_cx is not None else averaged_cx
+        # Update prev_cx and reset pending_branch when all scan-lines have decided
+        if branch_cx is None:
+            self.prev_cx = averaged_cx
+        else:
+            if self.pending_branch == 0:
+                # all scan-lines have completed branch selection
+                self.prev_cx = branch_cx
+                self.pending_branch = len(self.scan_lines)
+            else:
+                # still waiting for other scan-lines, keep branch locked
+                self.prev_cx = branch_cx
 
         # Compute angular velocity using proportional control
         angular = np.clip(
