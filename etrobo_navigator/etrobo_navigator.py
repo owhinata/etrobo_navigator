@@ -7,6 +7,12 @@ import cv2
 import numpy as np
 
 
+_STATE_ABBR = {
+    "normal": "norm",
+    "blue_detected": "bdet",
+    "blue_to_black": "btbl",
+}
+
 class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
     BRANCH_CX_TOL = 25  # pixels
@@ -76,14 +82,16 @@ class NavigatorNode(Node):
         # log per-scanline blob info: start,width,chosen_center,state
         # compact per-scanline blob info: output all candidates and mark chosen
         entries: list[str] = []
+        # compact per-scanline blob info: output all candidates and mark chosen
+        entries: list[str] = []
         for _, candidates, chosen, state in debug_info:
+            abbr = _STATE_ABBR.get(state, state)
             if candidates:
                 for start, w, cx in candidates:
                     mark = '*' if chosen == cx else ''
-                    entries.append(f"{start},{w},{state}{mark}")
+                    entries.append(f"{start},{w},{abbr}{mark}")
             else:
-                # no candidate: output placeholder
-                entries.append(f"-,-,{state}")
+                entries.append(f"-,-,{abbr}")
         self.get_logger().info(" ".join(entries))
 
         if self.debug:
@@ -316,7 +324,7 @@ class NavigatorNode(Node):
             # draw state label
             cv2.putText(
                 debug_image,
-                state,
+                _STATE_ABBR.get(state, state),
                 (10, y + 15),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
