@@ -323,9 +323,9 @@ class NavigatorNode(Node):
                     markerSize=8,
                     thickness=1,
                 )
-            # highlight chosen blob with circle
+            # highlight chosen blob with filled circle
             if chosen_cx is not None:
-                cv2.circle(debug_image, (chosen_cx, y), 6, (0, 255, 0), 2)
+                cv2.circle(debug_image, (chosen_cx, y), 6, (0, 255, 0), -1)
             # draw state label
             cv2.putText(
                 debug_image,
