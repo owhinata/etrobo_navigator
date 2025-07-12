@@ -73,6 +73,20 @@ class NavigatorNode(Node):
         linear, angular = self._compute_command(deviation)
         self._publish_cmd(linear, angular)
 
+        # log per-scanline blob info: start,width,chosen_center,state
+        entries: list[str] = []
+        for y, candidates, chosen, state in debug_info:
+            if candidates and chosen is not None:
+                for start, w, cx in candidates:
+                    if cx == chosen:
+                        entries.append(f"{start},{w},{cx},{state}")
+                        break
+                else:
+                    entries.append(f"-,-,{chosen},{state}")
+            else:
+                entries.append(f"-,-,{chosen},{state}")
+        self.get_logger().info(" ".join(entries))
+
         if self.debug:
             self._show_debug(
                 cv_image,
@@ -132,13 +146,9 @@ class NavigatorNode(Node):
             )
             cx_list.append((chosen_cx, weight))
         else:
-            if branch_cx is not None:
-                chosen_cx = branch_cx
-                debug_info.append(
-                    (y, chosen_cx, state, blue_count, blue_ratio))
-                cx_list.append((chosen_cx, weight))
-            else:
-                debug_info.append((y, None, state, blue_count, blue_ratio))
+            candidates: list[tuple[int, int, int]] = []
+            chosen_cx = branch_cx
+            debug_info.append((y, candidates, chosen_cx, state))
 
         self.sl_state[i] = state
         return branch_cx
@@ -149,11 +159,17 @@ class NavigatorNode(Node):
         y = int(ratio * height)
         return y, binary[y, :], hsv[y: y + 1, :, :]
 
-    def _detect_blob_centers(self, indices: np.ndarray) -> list[tuple[int, int]]:
-        """Split indices into connected blobs and return their center x and widths."""
+    def _detect_blob_centers(self, indices: np.ndarray) -> list[tuple[int, int, int]]:
+        """Split indices into blobs and return their start x, width, and center x."""
         splits = np.where(np.diff(indices) > 1)[0] + 1
         blobs = np.split(indices, splits)
-        return [(int(np.mean(blob)), blob[-1] - blob[0] + 1) for blob in blobs]
+        result: list[tuple[int, int, int]] = []
+        for blob in blobs:
+            start = int(blob[0])
+            w = int(blob[-1] - blob[0] + 1)
+            cx = int(np.mean(blob))
+            result.append((start, w, cx))
+        return result
 
     def _analyze_blue(self, hsv_row: np.ndarray, width: int) -> tuple[int, float, bool]:
         """Count blue pixels on a scanline and determine presence of blue region."""
@@ -186,26 +202,27 @@ class NavigatorNode(Node):
     ) -> tuple[int, int | None, str]:
         """Select blob center and handle branching logic, updating lists as needed."""
         target = branch_cx if branch_cx is not None else base_cx
-        chosen_cx, _ = min(candidates, key=lambda c: abs(c[0] - target))
+        chosen_cx, _, _ = min(candidates, key=lambda c: abs(c[2] - target))
 
         if state == "blue_to_black" and branch_cx is None:
             near = [
                 c for c in candidates
-                if abs(c[0] - base_cx) <= self.BRANCH_WINDOW
+                if abs(c[2] - base_cx) <= self.BRANCH_WINDOW
                 and c[1] >= self.MIN_BLOB_WIDTH
             ]
             if len(near) >= 2:
-                chosen_cx, _ = max(near, key=lambda c: c[0])
-                branch_cx = chosen_cx
+                _, _, cx2 = max(near, key=lambda c: c[2])
+                branch_cx = cx2
+                # retroactively update previous entries
                 cx_list[:] = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
                 debug_info[:] = [
-                    (info[0], branch_cx, info[2], info[3], info[4])
+                    (info[0], info[1], branch_cx, info[3])
                     for info in debug_info
                 ]
                 state = "normal"
                 self.pending_branch -= 1
 
-        debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+        debug_info.append((y, candidates, chosen_cx, state))
         return chosen_cx, branch_cx, state
 
     def _compute_velocity_params(self, cx_list, width):
@@ -251,9 +268,9 @@ class NavigatorNode(Node):
         cmd.linear.x = linear
         cmd.angular.z = angular
         self.pub.publish(cmd)
-        self.get_logger().info(
-            f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}"
-        )
+        # self.get_logger().info(
+        #     f"cmd_vel: linear={linear:.4f}, angular={angular:.4f}"
+        # )
 
     def _handle_no_line(self, cv_image, debug_info):
         """Handle case when no line is detected."""
@@ -278,25 +295,24 @@ class NavigatorNode(Node):
         debug_image = image.copy()
         width = image.shape[1]
 
-        for y, cx, state, blue_count, blue_ratio in debug_info:
+        for y, candidates, chosen_cx, state in debug_info:
+            # draw scan line
             cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
-            if cx is not None:
-                cv2.circle(debug_image, (cx, y), 4, (0, 255, 0), -1)
-            else:
-                cv2.line(
+            # draw blob candidates
+            for start, w, cx in candidates:
+                color = (0, 255, 0)
+                cv2.drawMarker(
                     debug_image,
-                    (width // 2 - 5, y - 5),
-                    (width // 2 + 5, y + 5),
-                    (0, 0, 255),
-                    1,
+                    (cx, y),
+                    color,
+                    markerType=cv2.MARKER_TILTED_CROSS,
+                    markerSize=8,
+                    thickness=1,
                 )
-                cv2.line(
-                    debug_image,
-                    (width // 2 - 5, y + 5),
-                    (width // 2 + 5, y - 5),
-                    (0, 0, 255),
-                    1,
-                )
+            # highlight chosen blob
+            if chosen_cx is not None:
+                cv2.circle(debug_image, (chosen_cx, y), 4, (0, 255, 0), -1)
+            # draw state label
             cv2.putText(
                 debug_image,
                 state,
@@ -304,16 +320,6 @@ class NavigatorNode(Node):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                debug_image,
-                f"bc={blue_count} ({blue_ratio:.2f})",
-                (width - 160, y + 15),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 0),
                 1,
                 cv2.LINE_AA,
             )
