@@ -311,20 +311,21 @@ class NavigatorNode(Node):
         for y, candidates, chosen_cx, state in debug_info:
             # draw scan line
             cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
-            # draw blob candidates
+            # draw blob candidates (non-selected)
             for start, w, cx in candidates:
-                color = (0, 255, 0)
+                if cx == chosen_cx:
+                    continue
                 cv2.drawMarker(
                     debug_image,
                     (cx, y),
-                    color,
+                    (0, 255, 0),
                     markerType=cv2.MARKER_TILTED_CROSS,
                     markerSize=8,
                     thickness=1,
                 )
-            # highlight chosen blob
+            # highlight chosen blob with circle
             if chosen_cx is not None:
-                cv2.circle(debug_image, (chosen_cx, y), 4, (0, 255, 0), -1)
+                cv2.circle(debug_image, (chosen_cx, y), 6, (0, 255, 0), 2)
             # draw state label
             cv2.putText(
                 debug_image,
