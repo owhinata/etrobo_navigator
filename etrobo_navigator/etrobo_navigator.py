@@ -11,6 +11,7 @@ class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
     BRANCH_CX_TOL = 25  # pixels
     BRANCH_WINDOW = 40  # pixels (tune if needed)
+
     def __init__(self):
         super().__init__('navigator_node')
 
@@ -117,9 +118,11 @@ class NavigatorNode(Node):
         """Process a single scan line and update cx_list, debug_info, and branch selection."""
         # prepare scan line
         y, row, hsv_row = self._compute_scanline_data(ratio, binary, hsv)
-        blue_count, blue_ratio, blue_present = self._analyze_blue(hsv_row, row.size)
+        blue_count, blue_ratio, blue_present = self._analyze_blue(
+            hsv_row, row.size)
         indices = np.where(row == 255)[0]
-        state = self._update_state(self.sl_state[i], blue_present, bool(indices.size))
+        state = self._update_state(
+            self.sl_state[i], blue_present, bool(indices.size))
 
         if indices.size:
             candidates = self._detect_blob_centers(indices)
@@ -131,7 +134,8 @@ class NavigatorNode(Node):
         else:
             if branch_cx is not None:
                 chosen_cx = branch_cx
-                debug_info.append((y, chosen_cx, state, blue_count, blue_ratio))
+                debug_info.append(
+                    (y, chosen_cx, state, blue_count, blue_ratio))
                 cx_list.append((chosen_cx, weight))
             else:
                 debug_info.append((y, None, state, blue_count, blue_ratio))
@@ -143,7 +147,7 @@ class NavigatorNode(Node):
         """Return y-coordinate, binary row, and HSV row for a given scanline ratio."""
         height, width = binary.shape[:2]
         y = int(ratio * height)
-        return y, binary[y, :], hsv[y : y + 1, :, :]
+        return y, binary[y, :], hsv[y: y + 1, :, :]
 
     def _detect_blob_centers(self, indices: np.ndarray) -> list[tuple[int, int]]:
         """Split indices into connected blobs and return their center x and widths."""
@@ -208,7 +212,8 @@ class NavigatorNode(Node):
         """Compute deviation, confidence, and averaged center from cx_list."""
         confidence = len(cx_list) / len(self.scan_lines)
         total_weight = sum(w for _, w in cx_list)
-        deviation = sum((cx - width // 2) * w for cx, w in cx_list) / total_weight
+        deviation = sum((cx - width // 2) * w for cx,
+                        w in cx_list) / total_weight
         averaged_cx = sum(cx * w for cx, w in cx_list) / total_weight
         return deviation, confidence, averaged_cx
 
