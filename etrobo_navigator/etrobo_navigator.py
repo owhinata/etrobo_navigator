@@ -56,6 +56,19 @@ class ScanLineResult:
 class ProcessingState:
     branch_cx: Optional[int]
     pending_branch: int
+    
+    def detect_branch(self, new_branch_cx: int) -> None:
+        """Detect a new branch and update state accordingly."""
+        self.branch_cx = new_branch_cx
+        self.pending_branch -= 1
+    
+    def should_lock_branch(self) -> bool:
+        """Check if branch should be locked during selection phase."""
+        return self.pending_branch > 0 and self.branch_cx is not None
+    
+    def is_branch_selection_complete(self) -> bool:
+        """Check if branch selection phase is complete."""
+        return self.pending_branch == 0
 
 
 class NavigatorNode(Node):
@@ -177,7 +190,7 @@ class NavigatorNode(Node):
         
         for i, (ratio, weight) in enumerate(zip(self.scan_lines, self.weights)):
             # Lock branch center during selection phase
-            if processing_state.pending_branch > 0 and processing_state.branch_cx is not None:
+            if processing_state.should_lock_branch():
                 self.prev_cx = processing_state.branch_cx
 
             result = self._process_scan_line(
@@ -189,11 +202,15 @@ class NavigatorNode(Node):
                 cx_list.append((result.chosen_cx, result.weight))
             
             debug_info.append(result.debug_entry)
-            processing_state.branch_cx = result.branch_cx
             
-            # Update pending_branch if it was modified by _handle_branch
-            self.pending_branch = processing_state.pending_branch
+            # Centralized state management
+            if result.branch_cx != processing_state.branch_cx and result.branch_cx is not None:
+                processing_state.detect_branch(result.branch_cx)
+            else:
+                processing_state.branch_cx = result.branch_cx
 
+        # Update instance state after processing all scan lines
+        self.pending_branch = processing_state.pending_branch
         return cx_list, debug_info, processing_state.branch_cx
 
     def _process_scan_line(
@@ -225,10 +242,7 @@ class NavigatorNode(Node):
             branch_cx = result.branch_cx
             state = result.state
             
-            # Update processing_state if branch was detected
-            if result.branch_cx != processing_state.branch_cx:
-                processing_state.branch_cx = result.branch_cx
-                processing_state.pending_branch -= 1
+            # Note: branch state updates will be handled centrally in _process_scan_lines
             
             # Extract debug entry from temporary list
             temp_y, temp_candidates, temp_chosen, temp_state = temp_debug_info[0]
@@ -327,7 +341,7 @@ class NavigatorNode(Node):
                 cx_list[:] = [(new_branch_cx, w_prev)
                               for (_, w_prev) in cx_list]
                 result_state = "normal"
-                self.pending_branch -= 1
+                # Note: pending_branch will be updated by ProcessingState.detect_branch()
 
         debug_info.append((context.y, candidates, chosen_cx, result_state))
         return BranchResult(chosen_cx, result_branch_cx, result_state)
