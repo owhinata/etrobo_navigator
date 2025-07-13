@@ -94,7 +94,7 @@ class NavigatorNode(Node):
 
         # --- Parameters ---
         # Normalized y-positions of scan lines (0.0 = top, 1.0 = bottom)
-        # Closer scan lines have higher priority
+        # 6 scan lines for detection
         self.scan_lines = [
             0.625, 0.666, 0.708, 0.75, 0.791, 0.833
         ]
@@ -106,8 +106,8 @@ class NavigatorNode(Node):
         # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
         # With 28 mm wheel radius, the theoretical max is about 0.62 m/s
         self.min_linear = 0.1                  # Min linear velocity [m/s]
-        self.max_linear = 0.54                 # Max linear velocity [m/s]
-        self.max_angular = 0.6                 # Max angular velocity [rad/s]
+        self.max_linear = 0.45                 # Max linear velocity [m/s]
+        self.max_angular = 0.5                 # Max angular velocity [rad/s]
         self.alpha = 0.7                       # Low-pass filter coefficient
         self.prev_linear = 0.1                 # Previous linear velocity
         self.prev_cx: float | None = None      # Previous line center
