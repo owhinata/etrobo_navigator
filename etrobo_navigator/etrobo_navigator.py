@@ -94,7 +94,7 @@ class NavigatorNode(Node):
 
         # --- Parameters ---
         # Normalized y-positions of scan lines (0.0 = top, 1.0 = bottom)
-        # Closer scan lines have higher priority
+        # 6 scan lines for detection
         self.scan_lines = [
             0.625, 0.666, 0.708, 0.75, 0.791, 0.833
         ]
@@ -106,8 +106,8 @@ class NavigatorNode(Node):
         # Motor max speed: 185 RPM ±15% -> ~212.8 RPM at no load
         # With 28 mm wheel radius, the theoretical max is about 0.62 m/s
         self.min_linear = 0.1                  # Min linear velocity [m/s]
-        self.max_linear = 0.54                 # Max linear velocity [m/s]
-        self.max_angular = 0.6                 # Max angular velocity [rad/s]
+        self.max_linear = 0.45                 # Max linear velocity [m/s]
+        self.max_angular = 0.5                 # Max angular velocity [rad/s]
         self.alpha = 0.7                       # Low-pass filter coefficient
         self.prev_linear = 0.1                 # Previous linear velocity
         self.prev_cx: float | None = None      # Previous line center
@@ -122,6 +122,8 @@ class NavigatorNode(Node):
         self.sl_state = ["normal"] * len(self.scan_lines)
         # Counter to lock branch selection until all scan-lines have decided
         self.pending_branch = len(self.scan_lines)
+        # Global counter for completed blue events (for alternating branch direction)
+        self.branch_count = 0
 
         # Debug parameter to enable OpenCV visualization
         self.declare_parameter('debug', False)
@@ -326,12 +328,33 @@ class NavigatorNode(Node):
         return chosen_cx
 
     def _detect_branch_from_candidates(self, candidates: list[BlobCandidate], prev_cx: float) -> Optional[int]:
-        """Detect branch by finding two nearest candidates and choosing rightmost."""
-        if len(candidates) >= 2:
-            two_nearest = sorted(
-                candidates, key=lambda c: abs(c.cx - prev_cx))[:2]
-            return max(two_nearest, key=lambda c: c.cx).cx
-        return None
+        """Detect branch with alternating left/right direction based on branch_count."""
+        if len(candidates) < 2:
+            return None
+
+        # Build near list (same filtering as original implementation)
+        near = [
+            c for c in candidates
+            if abs(c.cx - prev_cx) <= self.BRANCH_WINDOW
+            and c.width >= self.MIN_BLOB_WIDTH
+        ]
+
+        if len(near) < 2:
+            return None
+
+        # Determine direction: 0-based count means 1st event (count=0) goes right
+        want_right = (self.branch_count % 2 == 0)
+
+        if want_right:
+            chosen_cx = max(near, key=lambda c: c.cx).cx  # rightmost
+        else:
+            chosen_cx = min(near, key=lambda c: c.cx).cx  # leftmost
+
+        # Debug logging for branch direction
+        self.get_logger().info(f"Branch #{self.branch_count + 1}: "
+                               f"{'right' if want_right else 'left'} chosen (cx={chosen_cx})")
+
+        return chosen_cx
 
     def _select_blob_fallback(self, context: ScanLineContext, prev_cx: float) -> int:
         """Select fallback blob center when no candidates are available."""
@@ -389,6 +412,10 @@ class NavigatorNode(Node):
             self.prev_cx = averaged_cx
         else:
             if self.pending_branch == 0:
+                # Blue event completion: increment global counter
+                self.branch_count += 1
+                self.get_logger().info(
+                    f"Blue event #{self.branch_count} completed")
                 self.prev_cx = branch_cx
                 self.pending_branch = len(self.scan_lines)
             else:
@@ -409,6 +436,12 @@ class NavigatorNode(Node):
             1.0 - self.alpha
         ) * new_linear
         self.prev_linear = linear
+
+        # Debug logging for velocity control
+        self.get_logger().info(
+            f"deviation={deviation:.2f}, angular={angular:.4f}, linear={linear:.4f}"
+        )
+
         return linear, angular
 
     def _publish_cmd(self, linear, angular):
@@ -505,10 +538,22 @@ class NavigatorNode(Node):
                 1,
                 cv2.LINE_AA,
             )
+            # Add linear velocity display
+            linear_vel = self.prev_linear
+            cv2.putText(
+                debug_image,
+                f"Linear: {linear_vel:.2f}",
+                (10, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
             cv2.putText(
                 debug_image,
                 f"Confidence: {confidence:.2f}",
-                (10, 70),
+                (10, 90),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (255, 255, 255),
