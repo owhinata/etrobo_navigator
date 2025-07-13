@@ -53,6 +53,12 @@ class ScanLineResult:
 
 
 @dataclass
+class WeightedCenter:
+    cx: int
+    weight: float
+
+
+@dataclass
 class ProcessingState:
     branch_cx: Optional[int]
     pending_branch: int
@@ -199,12 +205,14 @@ class NavigatorNode(Node):
             
             # Extract results
             if result.chosen_cx is not None:
-                cx_list.append((result.chosen_cx, result.weight))
+                cx_list.append(WeightedCenter(result.chosen_cx, result.weight))
             
             debug_info.append(result.debug_entry)
             
             # Centralized state management
             if result.branch_cx != processing_state.branch_cx and result.branch_cx is not None:
+                # Handle retroactive update of cx_list when branch is detected
+                cx_list[:] = [WeightedCenter(result.branch_cx, wc.weight) for wc in cx_list]
                 processing_state.detect_branch(result.branch_cx)
             else:
                 processing_state.branch_cx = result.branch_cx
@@ -233,20 +241,11 @@ class NavigatorNode(Node):
                 y=y, weight=weight, state=state, base_cx=base_cx,
                 branch_cx=processing_state.branch_cx, blue_count=blue_count, blue_ratio=blue_ratio
             )
-            # Create temporary lists for _handle_branch compatibility
-            temp_cx_list: list[tuple[int, float]] = []
-            temp_debug_info: list[tuple[int, list[tuple[int, int, int]], int, str]] = []
             
-            result = self._handle_branch(candidates, context, temp_cx_list, temp_debug_info)
+            result, debug_entry = self._handle_branch_with_context(candidates, context)
             chosen_cx = result.chosen_cx
             branch_cx = result.branch_cx
             state = result.state
-            
-            # Note: branch state updates will be handled centrally in _process_scan_lines
-            
-            # Extract debug entry from temporary list
-            temp_y, temp_candidates, temp_chosen, temp_state = temp_debug_info[0]
-            debug_entry = DebugEntry(temp_y, temp_candidates, temp_chosen, temp_state)
         else:
             candidates: list[tuple[int, int, int]] = []
             chosen_cx = processing_state.branch_cx
@@ -316,14 +315,12 @@ class NavigatorNode(Node):
             return branch_cx
         return None
 
-    def _handle_branch(
+    def _handle_branch_with_context(
         self,
         candidates: list[tuple[int, int, int]],
         context: ScanLineContext,
-        cx_list: list[tuple[int, float]],
-        debug_info: list[tuple[int, list[tuple[int, int, int]], int, str]],
-    ) -> BranchResult:
-        """Select blob center and handle branching logic."""
+    ) -> tuple[BranchResult, DebugEntry]:
+        """Select blob center and handle branching logic, returning both result and debug entry."""
         target = context.branch_cx if context.branch_cx is not None else context.base_cx
         chosen_cx = self._select_blob_center(candidates, target)
 
@@ -337,22 +334,19 @@ class NavigatorNode(Node):
 
             if new_branch_cx is not None:
                 result_branch_cx = new_branch_cx
-                # retroactively update previous entries with preserved branch_cx
-                cx_list[:] = [(new_branch_cx, w_prev)
-                              for (_, w_prev) in cx_list]
                 result_state = "normal"
-                # Note: pending_branch will be updated by ProcessingState.detect_branch()
 
-        debug_info.append((context.y, candidates, chosen_cx, result_state))
-        return BranchResult(chosen_cx, result_branch_cx, result_state)
+        debug_entry = DebugEntry(context.y, candidates, chosen_cx, result_state)
+        branch_result = BranchResult(chosen_cx, result_branch_cx, result_state)
+        
+        return branch_result, debug_entry
 
-    def _compute_velocity_params(self, cx_list, width):
+    def _compute_velocity_params(self, cx_list: list[WeightedCenter], width):
         """Compute deviation, confidence, and averaged center from cx_list."""
         confidence = len(cx_list) / len(self.scan_lines)
-        total_weight = sum(w for _, w in cx_list)
-        deviation = sum((cx - width // 2) * w for cx,
-                        w in cx_list) / total_weight
-        averaged_cx = sum(cx * w for cx, w in cx_list) / total_weight
+        total_weight = sum(wc.weight for wc in cx_list)
+        deviation = sum((wc.cx - width // 2) * wc.weight for wc in cx_list) / total_weight
+        averaged_cx = sum(wc.cx * wc.weight for wc in cx_list) / total_weight
         return deviation, confidence, averaged_cx
 
     def _update_prev_cx(self, branch_cx, averaged_cx):
