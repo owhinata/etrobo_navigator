@@ -29,9 +29,16 @@ class ScanLineContext:
 
 
 @dataclass
+class BlobCandidate:
+    start: int
+    width: int
+    cx: int
+
+
+@dataclass
 class DebugEntry:
     y: int
-    candidates: list[tuple[int, int, int]]
+    candidates: list[BlobCandidate]
     chosen_cx: Optional[int]
     state: str
 
@@ -62,16 +69,16 @@ class WeightedCenter:
 class ProcessingState:
     branch_cx: Optional[int]
     pending_branch: int
-    
+
     def detect_branch(self, new_branch_cx: int) -> None:
         """Detect a new branch and update state accordingly."""
         self.branch_cx = new_branch_cx
         self.pending_branch -= 1
-    
+
     def should_lock_branch(self) -> bool:
         """Check if branch should be locked during selection phase."""
         return self.pending_branch > 0 and self.branch_cx is not None
-    
+
     def is_branch_selection_complete(self) -> bool:
         """Check if branch selection phase is complete."""
         return self.pending_branch == 0
@@ -132,18 +139,19 @@ class NavigatorNode(Node):
         abbr = _STATE_ABBR.get(debug_entry.state, debug_entry.state)
         if debug_entry.candidates:
             parts = [abbr]
-            for start, w, cx in debug_entry.candidates:
-                if cx == debug_entry.chosen_cx:
-                    parts.append(f"{start},{w}*")
+            for candidate in debug_entry.candidates:
+                if candidate.cx == debug_entry.chosen_cx:
+                    parts.append(f"{candidate.start},{candidate.width}*")
                 else:
-                    parts.append(f"{start},{w}")
+                    parts.append(f"{candidate.start},{candidate.width}")
             return ",".join(parts)
         else:
             return f"{abbr},-,-"
 
     def _generate_debug_log(self, debug_entries: list[DebugEntry]) -> None:
         """Generate and log debug information for all scan lines."""
-        entries = [self._format_debug_log_entry(entry) for entry in debug_entries]
+        entries = [self._format_debug_log_entry(
+            entry) for entry in debug_entries]
         self.get_logger().info("\n" + "\n".join(entries))
 
     def image_callback(self, msg):
@@ -188,12 +196,12 @@ class NavigatorNode(Node):
         cx_list = []
         debug_info = []
         base_cx = self.prev_cx if self.prev_cx is not None else width // 2
-        
+
         processing_state = ProcessingState(
             branch_cx=None,
             pending_branch=self.pending_branch
         )
-        
+
         for i, (ratio, weight) in enumerate(zip(self.scan_lines, self.weights)):
             # Lock branch center during selection phase
             if processing_state.should_lock_branch():
@@ -202,17 +210,18 @@ class NavigatorNode(Node):
             result = self._process_scan_line(
                 i, ratio, weight, binary, hsv, base_cx, processing_state
             )
-            
+
             # Extract results
             if result.chosen_cx is not None:
                 cx_list.append(WeightedCenter(result.chosen_cx, result.weight))
-            
+
             debug_info.append(result.debug_entry)
-            
+
             # Centralized state management
             if result.branch_cx != processing_state.branch_cx and result.branch_cx is not None:
                 # Handle retroactive update of cx_list when branch is detected
-                cx_list[:] = [WeightedCenter(result.branch_cx, wc.weight) for wc in cx_list]
+                cx_list[:] = [WeightedCenter(
+                    result.branch_cx, wc.weight) for wc in cx_list]
                 processing_state.detect_branch(result.branch_cx)
             else:
                 processing_state.branch_cx = result.branch_cx
@@ -241,13 +250,14 @@ class NavigatorNode(Node):
                 y=y, weight=weight, state=state, base_cx=base_cx,
                 branch_cx=processing_state.branch_cx, blue_count=blue_count, blue_ratio=blue_ratio
             )
-            
-            result, debug_entry = self._handle_branch_with_context(candidates, context)
+
+            result, debug_entry = self._handle_branch_with_context(
+                candidates, context)
             chosen_cx = result.chosen_cx
             branch_cx = result.branch_cx
             state = result.state
         else:
-            candidates: list[tuple[int, int, int]] = []
+            candidates: list[BlobCandidate] = []
             chosen_cx = processing_state.branch_cx
             branch_cx = processing_state.branch_cx
             debug_entry = DebugEntry(y, candidates, chosen_cx, state)
@@ -255,7 +265,7 @@ class NavigatorNode(Node):
         self.sl_state[i] = state
         return ScanLineResult(
             chosen_cx=chosen_cx,
-            branch_cx=branch_cx, 
+            branch_cx=branch_cx,
             state=state,
             weight=weight,
             debug_entry=debug_entry
@@ -267,16 +277,16 @@ class NavigatorNode(Node):
         y = int(ratio * height)
         return y, binary[y, :], hsv[y: y + 1, :, :]
 
-    def _detect_blob_centers(self, indices: np.ndarray) -> list[tuple[int, int, int]]:
+    def _detect_blob_centers(self, indices: np.ndarray) -> list[BlobCandidate]:
         """Split indices into blobs and return their start x, width, and center x."""
         splits = np.where(np.diff(indices) > 1)[0] + 1
         blobs = np.split(indices, splits)
-        result: list[tuple[int, int, int]] = []
+        result: list[BlobCandidate] = []
         for blob in blobs:
             start = int(blob[0])
-            w = int(blob[-1] - blob[0] + 1)
+            width = int(blob[-1] - blob[0] + 1)
             cx = int(np.mean(blob))
-            result.append((start, w, cx))
+            result.append(BlobCandidate(start, width, cx))
         return result
 
     def _analyze_blue(self, hsv_row: np.ndarray, width: int) -> tuple[int, float, bool]:
@@ -295,29 +305,29 @@ class NavigatorNode(Node):
             return "blue_to_black"
         return state
 
-    def _select_blob_center(self, candidates: list[tuple[int, int, int]], target_cx: float) -> int:
+    def _select_blob_center(self, candidates: list[BlobCandidate], target_cx: float) -> int:
         """Select the best blob center from candidates based on target."""
-        _, _, chosen_cx = min(candidates, key=lambda c: abs(c[2] - target_cx))
+        chosen_cx = min(candidates, key=lambda c: abs(c.cx - target_cx)).cx
         return chosen_cx
 
-    def _find_branch_candidates(self, candidates: list[tuple[int, int, int]], base_cx: float) -> list[tuple[int, int, int]]:
+    def _find_branch_candidates(self, candidates: list[BlobCandidate], base_cx: float) -> list[BlobCandidate]:
         """Find candidates suitable for branching."""
         return [
             c for c in candidates
-            if abs(c[2] - base_cx) <= self.BRANCH_WINDOW
-            and c[1] >= self.MIN_BLOB_WIDTH
+            if abs(c.cx - base_cx) <= self.BRANCH_WINDOW
+            and c.width >= self.MIN_BLOB_WIDTH
         ]
 
-    def _select_branch_center(self, near_candidates: list[tuple[int, int, int]]) -> Optional[int]:
+    def _select_branch_center(self, near_candidates: list[BlobCandidate]) -> Optional[int]:
         """Select branch center from near candidates."""
         if len(near_candidates) >= 2:
-            _, _, branch_cx = max(near_candidates, key=lambda c: c[2])
+            branch_cx = max(near_candidates, key=lambda c: c.cx).cx
             return branch_cx
         return None
 
     def _handle_branch_with_context(
         self,
-        candidates: list[tuple[int, int, int]],
+        candidates: list[BlobCandidate],
         context: ScanLineContext,
     ) -> tuple[BranchResult, DebugEntry]:
         """Select blob center and handle branching logic, returning both result and debug entry."""
@@ -336,16 +346,18 @@ class NavigatorNode(Node):
                 result_branch_cx = new_branch_cx
                 result_state = "normal"
 
-        debug_entry = DebugEntry(context.y, candidates, chosen_cx, result_state)
+        debug_entry = DebugEntry(
+            context.y, candidates, chosen_cx, result_state)
         branch_result = BranchResult(chosen_cx, result_branch_cx, result_state)
-        
+
         return branch_result, debug_entry
 
     def _compute_velocity_params(self, cx_list: list[WeightedCenter], width):
         """Compute deviation, confidence, and averaged center from cx_list."""
         confidence = len(cx_list) / len(self.scan_lines)
         total_weight = sum(wc.weight for wc in cx_list)
-        deviation = sum((wc.cx - width // 2) * wc.weight for wc in cx_list) / total_weight
+        deviation = sum((wc.cx - width // 2) *
+                        wc.weight for wc in cx_list) / total_weight
         averaged_cx = sum(wc.cx * wc.weight for wc in cx_list) / total_weight
         return deviation, confidence, averaged_cx
 
@@ -409,14 +421,15 @@ class NavigatorNode(Node):
 
         for debug_entry in debug_info:
             # draw scan line
-            cv2.line(debug_image, (0, debug_entry.y), (width - 1, debug_entry.y), (255, 0, 0), 1)
+            cv2.line(debug_image, (0, debug_entry.y),
+                     (width - 1, debug_entry.y), (255, 0, 0), 1)
             # draw blob candidates (non-selected)
-            for start, w, cx in debug_entry.candidates:
-                if cx == debug_entry.chosen_cx:
+            for candidate in debug_entry.candidates:
+                if candidate.cx == debug_entry.chosen_cx:
                     continue
                 cv2.drawMarker(
                     debug_image,
-                    (cx, debug_entry.y),
+                    (candidate.cx, debug_entry.y),
                     (0, 255, 0),
                     markerType=cv2.MARKER_TILTED_CROSS,
                     markerSize=8,
@@ -424,7 +437,8 @@ class NavigatorNode(Node):
                 )
             # highlight chosen blob with filled circle
             if debug_entry.chosen_cx is not None:
-                cv2.circle(debug_image, (debug_entry.chosen_cx, debug_entry.y), 4, (0, 255, 0), -1)
+                cv2.circle(debug_image, (debug_entry.chosen_cx,
+                                         debug_entry.y), 4, (0, 255, 0), -1)
             # draw state label
             cv2.putText(
                 debug_image,
