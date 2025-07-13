@@ -122,6 +122,8 @@ class NavigatorNode(Node):
         self.sl_state = ["normal"] * len(self.scan_lines)
         # Counter to lock branch selection until all scan-lines have decided
         self.pending_branch = len(self.scan_lines)
+        # Global counter for completed blue events (for alternating branch direction)
+        self.branch_count = 0
 
         # Debug parameter to enable OpenCV visualization
         self.declare_parameter('debug', False)
@@ -326,12 +328,33 @@ class NavigatorNode(Node):
         return chosen_cx
 
     def _detect_branch_from_candidates(self, candidates: list[BlobCandidate], prev_cx: float) -> Optional[int]:
-        """Detect branch by finding two nearest candidates and choosing rightmost."""
-        if len(candidates) >= 2:
-            two_nearest = sorted(
-                candidates, key=lambda c: abs(c.cx - prev_cx))[:2]
-            return max(two_nearest, key=lambda c: c.cx).cx
-        return None
+        """Detect branch with alternating left/right direction based on branch_count."""
+        if len(candidates) < 2:
+            return None
+
+        # Build near list (same filtering as original implementation)
+        near = [
+            c for c in candidates
+            if abs(c.cx - prev_cx) <= self.BRANCH_WINDOW
+            and c.width >= self.MIN_BLOB_WIDTH
+        ]
+
+        if len(near) < 2:
+            return None
+
+        # Determine direction: 0-based count means 1st event (count=0) goes right
+        want_right = (self.branch_count % 2 == 0)
+
+        if want_right:
+            chosen_cx = max(near, key=lambda c: c.cx).cx  # rightmost
+        else:
+            chosen_cx = min(near, key=lambda c: c.cx).cx  # leftmost
+
+        # Debug logging for branch direction
+        self.get_logger().info(f"Branch #{self.branch_count + 1}: "
+                               f"{'right' if want_right else 'left'} chosen (cx={chosen_cx})")
+
+        return chosen_cx
 
     def _select_blob_fallback(self, context: ScanLineContext, prev_cx: float) -> int:
         """Select fallback blob center when no candidates are available."""
@@ -389,6 +412,10 @@ class NavigatorNode(Node):
             self.prev_cx = averaged_cx
         else:
             if self.pending_branch == 0:
+                # Blue event completion: increment global counter
+                self.branch_count += 1
+                self.get_logger().info(
+                    f"Blue event #{self.branch_count} completed")
                 self.prev_cx = branch_cx
                 self.pending_branch = len(self.scan_lines)
             else:
