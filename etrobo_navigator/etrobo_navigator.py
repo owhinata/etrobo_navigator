@@ -29,6 +29,14 @@ class ScanLineContext:
 
 
 @dataclass
+class DebugEntry:
+    y: int
+    candidates: list[tuple[int, int, int]]
+    chosen_cx: Optional[int]
+    state: str
+
+
+@dataclass
 class BranchResult:
     chosen_cx: int
     branch_cx: Optional[int]
@@ -41,7 +49,7 @@ class ScanLineResult:
     branch_cx: Optional[int]
     state: str
     weight: float
-    debug_entry: tuple[int, list[tuple[int, int, int]], Optional[int], str]
+    debug_entry: DebugEntry
 
 
 @dataclass
@@ -100,6 +108,25 @@ class NavigatorNode(Node):
 
         self.get_logger().info("NavigatorNode started. Waiting for camera images...")
 
+    def _format_debug_log_entry(self, debug_entry: DebugEntry) -> str:
+        """Format a single debug entry for logging."""
+        abbr = _STATE_ABBR.get(debug_entry.state, debug_entry.state)
+        if debug_entry.candidates:
+            parts = [abbr]
+            for start, w, cx in debug_entry.candidates:
+                if cx == debug_entry.chosen_cx:
+                    parts.append(f"{start},{w}*")
+                else:
+                    parts.append(f"{start},{w}")
+            return ",".join(parts)
+        else:
+            return f"{abbr},-,-"
+
+    def _generate_debug_log(self, debug_entries: list[DebugEntry]) -> None:
+        """Generate and log debug information for all scan lines."""
+        entries = [self._format_debug_log_entry(entry) for entry in debug_entries]
+        self.get_logger().info("\n" + "\n".join(entries))
+
     def image_callback(self, msg):
         """Process incoming camera image and publish velocity commands."""
         cv_image, binary, hsv = self._preprocess(msg)
@@ -117,22 +144,7 @@ class NavigatorNode(Node):
         self._publish_cmd(linear, angular)
 
         # log per-scanline blob info: state and blob candidates (start,width; chosen marked with *)
-        # compact per-scanline blob info: output all candidates and mark chosen
-        entries: list[str] = []
-        for _, candidates, chosen, state in debug_info:
-            abbr = _STATE_ABBR.get(state, state)
-            if candidates:
-                parts = [abbr]
-                for start, w, cx in candidates:
-                    if cx == chosen:
-                        parts.append(f"{start},{w}*")
-                    else:
-                        parts.append(f"{start},{w}")
-                entries.append(",".join(parts))
-            else:
-                entries.append(f"{abbr},-,-")
-        # print each scanline entry on its own line for readability
-        self.get_logger().info("\n" + "\n".join(entries))
+        self._generate_debug_log(debug_info)
 
         if self.debug:
             self._show_debug(
@@ -219,12 +231,13 @@ class NavigatorNode(Node):
                 processing_state.pending_branch -= 1
             
             # Extract debug entry from temporary list
-            debug_entry = temp_debug_info[0]
+            temp_y, temp_candidates, temp_chosen, temp_state = temp_debug_info[0]
+            debug_entry = DebugEntry(temp_y, temp_candidates, temp_chosen, temp_state)
         else:
             candidates: list[tuple[int, int, int]] = []
             chosen_cx = processing_state.branch_cx
             branch_cx = processing_state.branch_cx
-            debug_entry = (y, candidates, chosen_cx, state)
+            debug_entry = DebugEntry(y, candidates, chosen_cx, state)
 
         self.sl_state[i] = state
         return ScanLineResult(
@@ -376,42 +389,39 @@ class NavigatorNode(Node):
     def _show_debug(
         self,
         image: np.ndarray,
-        debug_info,
+        debug_info: list[DebugEntry],
         deviation: float | None = None,
         angular: float | None = None,
         confidence: float | None = None,
         message: str | None = None,
     ) -> None:
-        """Draw debug information on the image and display it.
-
-        ``debug_info`` is a list of tuples ``(y, cx_or_none, state, blue_count, blue_ratio)``.
-        """
+        """Draw debug information on the image and display it."""
         debug_image = image.copy()
         width = image.shape[1]
 
-        for y, candidates, chosen_cx, state in debug_info:
+        for debug_entry in debug_info:
             # draw scan line
-            cv2.line(debug_image, (0, y), (width - 1, y), (255, 0, 0), 1)
+            cv2.line(debug_image, (0, debug_entry.y), (width - 1, debug_entry.y), (255, 0, 0), 1)
             # draw blob candidates (non-selected)
-            for start, w, cx in candidates:
-                if cx == chosen_cx:
+            for start, w, cx in debug_entry.candidates:
+                if cx == debug_entry.chosen_cx:
                     continue
                 cv2.drawMarker(
                     debug_image,
-                    (cx, y),
+                    (cx, debug_entry.y),
                     (0, 255, 0),
                     markerType=cv2.MARKER_TILTED_CROSS,
                     markerSize=8,
                     thickness=1,
                 )
             # highlight chosen blob with filled circle
-            if chosen_cx is not None:
-                cv2.circle(debug_image, (chosen_cx, y), 4, (0, 255, 0), -1)
+            if debug_entry.chosen_cx is not None:
+                cv2.circle(debug_image, (debug_entry.chosen_cx, debug_entry.y), 4, (0, 255, 0), -1)
             # draw state label
             cv2.putText(
                 debug_image,
-                _STATE_ABBR.get(state, state),
-                (10, y + 15),
+                _STATE_ABBR.get(debug_entry.state, debug_entry.state),
+                (10, debug_entry.y + 15),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 255),
