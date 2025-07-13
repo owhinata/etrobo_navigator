@@ -35,6 +35,21 @@ class BranchResult:
     state: str
 
 
+@dataclass
+class ScanLineResult:
+    chosen_cx: Optional[int]
+    branch_cx: Optional[int]
+    state: str
+    weight: float
+    debug_entry: tuple[int, list[tuple[int, int, int]], Optional[int], str]
+
+
+@dataclass
+class ProcessingState:
+    branch_cx: Optional[int]
+    pending_branch: int
+
+
 class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
     BRANCH_CX_TOL = 25  # pixels
@@ -142,26 +157,39 @@ class NavigatorNode(Node):
         cx_list = []
         debug_info = []
         base_cx = self.prev_cx if self.prev_cx is not None else width // 2
-        branch_cx = None
+        
+        processing_state = ProcessingState(
+            branch_cx=None,
+            pending_branch=self.pending_branch
+        )
+        
         for i, (ratio, weight) in enumerate(zip(self.scan_lines, self.weights)):
             # Lock branch center during selection phase
-            if self.pending_branch > 0 and branch_cx is not None:
-                self.prev_cx = branch_cx
+            if processing_state.pending_branch > 0 and processing_state.branch_cx is not None:
+                self.prev_cx = processing_state.branch_cx
 
-            branch_cx = self._process_scan_line(
-                i, ratio, weight, binary, hsv, base_cx, branch_cx,
-                cx_list, debug_info
+            result = self._process_scan_line(
+                i, ratio, weight, binary, hsv, base_cx, processing_state
             )
+            
+            # Extract results
+            if result.chosen_cx is not None:
+                cx_list.append((result.chosen_cx, result.weight))
+            
+            debug_info.append(result.debug_entry)
+            processing_state.branch_cx = result.branch_cx
+            
+            # Update pending_branch if it was modified by _handle_branch
+            self.pending_branch = processing_state.pending_branch
 
-        return cx_list, debug_info, branch_cx
+        return cx_list, debug_info, processing_state.branch_cx
 
     def _process_scan_line(
-        self, i, ratio, weight,
-        binary, hsv,
-        base_cx, branch_cx,
-        cx_list, debug_info
-    ):
-        """Process a single scan line and update cx_list, debug_info, and branch selection."""
+        self, i: int, ratio: float, weight: float,
+        binary: np.ndarray, hsv: np.ndarray,
+        base_cx: float, processing_state: ProcessingState
+    ) -> ScanLineResult:
+        """Process a single scan line and return structured result."""
         # prepare scan line
         y, row, hsv_row = self._compute_scanline_data(ratio, binary, hsv)
         blue_count, blue_ratio, blue_present = self._analyze_blue(
@@ -174,21 +202,38 @@ class NavigatorNode(Node):
             candidates = self._detect_blob_centers(indices)
             context = ScanLineContext(
                 y=y, weight=weight, state=state, base_cx=base_cx,
-                branch_cx=branch_cx, blue_count=blue_count, blue_ratio=blue_ratio
+                branch_cx=processing_state.branch_cx, blue_count=blue_count, blue_ratio=blue_ratio
             )
-            result = self._handle_branch(
-                candidates, context, cx_list, debug_info)
-            cx_list.append((result.chosen_cx, weight))
+            # Create temporary lists for _handle_branch compatibility
+            temp_cx_list: list[tuple[int, float]] = []
+            temp_debug_info: list[tuple[int, list[tuple[int, int, int]], int, str]] = []
+            
+            result = self._handle_branch(candidates, context, temp_cx_list, temp_debug_info)
             chosen_cx = result.chosen_cx
             branch_cx = result.branch_cx
             state = result.state
+            
+            # Update processing_state if branch was detected
+            if result.branch_cx != processing_state.branch_cx:
+                processing_state.branch_cx = result.branch_cx
+                processing_state.pending_branch -= 1
+            
+            # Extract debug entry from temporary list
+            debug_entry = temp_debug_info[0]
         else:
             candidates: list[tuple[int, int, int]] = []
-            chosen_cx = branch_cx
-            debug_info.append((y, candidates, chosen_cx, state))
+            chosen_cx = processing_state.branch_cx
+            branch_cx = processing_state.branch_cx
+            debug_entry = (y, candidates, chosen_cx, state)
 
         self.sl_state[i] = state
-        return branch_cx
+        return ScanLineResult(
+            chosen_cx=chosen_cx,
+            branch_cx=branch_cx, 
+            state=state,
+            weight=weight,
+            debug_entry=debug_entry
+        )
 
     def _compute_scanline_data(self, ratio, binary, hsv):
         """Return y-coordinate, binary row, and HSV row for a given scanline ratio."""
