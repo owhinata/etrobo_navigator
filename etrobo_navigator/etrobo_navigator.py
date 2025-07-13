@@ -308,10 +308,8 @@ class NavigatorNode(Node):
             return "blue_to_black"
         return state
 
-    def _select_blob_center(self, candidates: list[BlobCandidate], target_cx: float) -> int:
-        """Select the best blob center from candidates based on target."""
-        chosen_cx = min(candidates, key=lambda c: abs(c.cx - target_cx)).cx
-        # --- DEBUG: show candidate centers, target, and distances
+    def _log_blob_selection_debug(self, candidates: list[BlobCandidate], target_cx: float, chosen_cx: int) -> None:
+        """Log debug information for blob selection."""
         cxs = [c.cx for c in candidates]
         distances = [abs(cx - target_cx) for cx in cxs]
         self.get_logger().debug(
@@ -320,23 +318,24 @@ class NavigatorNode(Node):
             f"distances={distances}, "
             f"chosen_cx={chosen_cx}"
         )
-        # --- DEBUG end
+
+    def _select_blob_center(self, candidates: list[BlobCandidate], target_cx: float) -> int:
+        """Select the best blob center from candidates based on target."""
+        chosen_cx = min(candidates, key=lambda c: abs(c.cx - target_cx)).cx
+        self._log_blob_selection_debug(candidates, target_cx, chosen_cx)
         return chosen_cx
 
-    def _find_branch_candidates(self, candidates: list[BlobCandidate], base_cx: float) -> list[BlobCandidate]:
-        """Find candidates suitable for branching."""
-        return [
-            c for c in candidates
-            if abs(c.cx - base_cx) <= self.BRANCH_WINDOW
-            and c.width >= self.MIN_BLOB_WIDTH
-        ]
-
-    def _select_branch_center(self, near_candidates: list[BlobCandidate]) -> Optional[int]:
-        """Select branch center from near candidates."""
-        if len(near_candidates) >= 2:
-            branch_cx = max(near_candidates, key=lambda c: c.cx).cx
-            return branch_cx
+    def _detect_branch_from_candidates(self, candidates: list[BlobCandidate], prev_cx: float) -> Optional[int]:
+        """Detect branch by finding two nearest candidates and choosing rightmost."""
+        if len(candidates) >= 2:
+            two_nearest = sorted(
+                candidates, key=lambda c: abs(c.cx - prev_cx))[:2]
+            return max(two_nearest, key=lambda c: c.cx).cx
         return None
+
+    def _select_blob_fallback(self, context: ScanLineContext, prev_cx: float) -> int:
+        """Select fallback blob center when no candidates are available."""
+        return context.branch_cx or int(prev_cx)
 
     def _handle_branch_with_context(
         self,
@@ -347,22 +346,27 @@ class NavigatorNode(Node):
         """Select blob center based on previous per-line center and branch logic."""
         prev = self.prev_cx_per_line[idx] or context.base_cx
 
-        # initial branch detection: if >=2 blobs in blue_to_black, pick two nearest and choose rightmost
-        if context.state == "blue_to_black" and len(candidates) >= 2:
-            two = sorted(candidates, key=lambda c: abs(c.cx - prev))[:2]
-            chosen = max(two, key=lambda c: c.cx).cx
-            result_state = "normal"
-            branch_cx = chosen
-        elif candidates:
-            # otherwise pick closest to previous center
+        # Try branch detection first if in blue_to_black state
+        if context.state == "blue_to_black":
+            branch_center = self._detect_branch_from_candidates(
+                candidates, prev)
+            if branch_center is not None:
+                chosen = branch_center
+                result_state = "normal"
+                branch_cx = chosen
+                self.prev_cx_per_line[idx] = chosen
+                debug_entry = DebugEntry(
+                    context.y, candidates, chosen, result_state)
+                return BranchResult(chosen, branch_cx, result_state), debug_entry
+
+        # Normal blob selection or fallback
+        if candidates:
             chosen = self._select_blob_center(candidates, prev)
-            result_state = context.state
-            branch_cx = context.branch_cx
         else:
-            # no candidate: fallback
-            chosen = context.branch_cx or int(prev)
-            result_state = context.state
-            branch_cx = context.branch_cx
+            chosen = self._select_blob_fallback(context, prev)
+
+        result_state = context.state
+        branch_cx = context.branch_cx
 
         # update per-line previous center
         self.prev_cx_per_line[idx] = chosen
