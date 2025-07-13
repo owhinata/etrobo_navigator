@@ -197,6 +197,9 @@ class NavigatorNode(Node):
         debug_info = []
         base_cx = self.prev_cx if self.prev_cx is not None else width // 2
 
+        # per-line previous center initialization (first frame)
+        if not hasattr(self, 'prev_cx_per_line'):
+            self.prev_cx_per_line = [None] * len(self.scan_lines)
         processing_state = ProcessingState(
             branch_cx=None,
             pending_branch=self.pending_branch
@@ -252,7 +255,7 @@ class NavigatorNode(Node):
             )
 
             result, debug_entry = self._handle_branch_with_context(
-                candidates, context)
+                i, candidates, context)
             chosen_cx = result.chosen_cx
             branch_cx = result.branch_cx
             state = result.state
@@ -308,6 +311,16 @@ class NavigatorNode(Node):
     def _select_blob_center(self, candidates: list[BlobCandidate], target_cx: float) -> int:
         """Select the best blob center from candidates based on target."""
         chosen_cx = min(candidates, key=lambda c: abs(c.cx - target_cx)).cx
+        # --- DEBUG: show candidate centers, target, and distances
+        cxs = [c.cx for c in candidates]
+        distances = [abs(cx - target_cx) for cx in cxs]
+        self.get_logger().debug(
+            f"candidates cx={cxs}, "
+            f"target={target_cx}, "
+            f"distances={distances}, "
+            f"chosen_cx={chosen_cx}"
+        )
+        # --- DEBUG end
         return chosen_cx
 
     def _find_branch_candidates(self, candidates: list[BlobCandidate], base_cx: float) -> list[BlobCandidate]:
@@ -327,30 +340,35 @@ class NavigatorNode(Node):
 
     def _handle_branch_with_context(
         self,
+        idx: int,
         candidates: list[BlobCandidate],
         context: ScanLineContext,
     ) -> tuple[BranchResult, DebugEntry]:
-        """Select blob center and handle branching logic, returning both result and debug entry."""
-        target = context.branch_cx if context.branch_cx is not None else context.base_cx
-        chosen_cx = self._select_blob_center(candidates, target)
+        """Select blob center based on previous per-line center and branch logic."""
+        prev = self.prev_cx_per_line[idx] or context.base_cx
 
-        result_branch_cx = context.branch_cx
-        result_state = context.state
+        # initial branch detection: if >=2 blobs in blue_to_black, pick two nearest and choose rightmost
+        if context.state == "blue_to_black" and len(candidates) >= 2:
+            two = sorted(candidates, key=lambda c: abs(c.cx - prev))[:2]
+            chosen = max(two, key=lambda c: c.cx).cx
+            result_state = "normal"
+            branch_cx = chosen
+        elif candidates:
+            # otherwise pick closest to previous center
+            chosen = self._select_blob_center(candidates, prev)
+            result_state = context.state
+            branch_cx = context.branch_cx
+        else:
+            # no candidate: fallback
+            chosen = context.branch_cx or int(prev)
+            result_state = context.state
+            branch_cx = context.branch_cx
 
-        if context.state == "blue_to_black" and context.branch_cx is None:
-            near_candidates = self._find_branch_candidates(
-                candidates, context.base_cx)
-            new_branch_cx = self._select_branch_center(near_candidates)
+        # update per-line previous center
+        self.prev_cx_per_line[idx] = chosen
 
-            if new_branch_cx is not None:
-                result_branch_cx = new_branch_cx
-                result_state = "normal"
-
-        debug_entry = DebugEntry(
-            context.y, candidates, chosen_cx, result_state)
-        branch_result = BranchResult(chosen_cx, result_branch_cx, result_state)
-
-        return branch_result, debug_entry
+        debug_entry = DebugEntry(context.y, candidates, chosen, result_state)
+        return BranchResult(chosen, branch_cx, result_state), debug_entry
 
     def _compute_velocity_params(self, cx_list: list[WeightedCenter], width):
         """Compute deviation, confidence, and averaged center from cx_list."""

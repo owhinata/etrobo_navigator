@@ -19,6 +19,11 @@ The package exposes a single node `NavigatorNode` that converts camera images in
     falls inside the window, the closest blob to the previous center is used.
     When a valid branch is chosen, the scan line immediately returns to
     `normal` and the selected center overrides all scan lines for that frame.
+    During the branch-following phase (after a confirmed `blue_to_black`),
+    for the next few scan lines (while `pending_branch` &gt; 0), each selects
+    the rightmost blob candidate regardless of distance to the previous center,
+    ensuring persistent right-hand branch tracking. Once `pending_branch`
+    expires, normal proximity-based selection resumes.
     While a scan line is in `blue_detected` or
     `blue_to_black`, its
     chosen center immediately replaces the reference center for the next lines
