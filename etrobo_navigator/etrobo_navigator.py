@@ -94,7 +94,8 @@ class NavigatorNode(Node):
                 entries.append(",".join(parts))
             else:
                 entries.append(f"{abbr},-,-")
-        self.get_logger().info(" ".join(entries))
+        # print each scanline entry on its own line for readability
+        self.get_logger().info("\n" + "\n".join(entries))
 
         if self.debug:
             self._show_debug(
