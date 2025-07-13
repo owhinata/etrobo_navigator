@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import Optional
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -12,6 +15,25 @@ _STATE_ABBR = {
     "blue_detected": "bdet",
     "blue_to_black": "btbl",
 }
+
+
+@dataclass
+class ScanLineContext:
+    y: int
+    weight: float
+    state: str
+    base_cx: float
+    branch_cx: Optional[int]
+    blue_count: int
+    blue_ratio: float
+
+
+@dataclass
+class BranchResult:
+    chosen_cx: int
+    branch_cx: Optional[int]
+    state: str
+
 
 class NavigatorNode(Node):
     MIN_BLOB_WIDTH = 5  # pixels
@@ -150,11 +172,16 @@ class NavigatorNode(Node):
 
         if indices.size:
             candidates = self._detect_blob_centers(indices)
-            chosen_cx, branch_cx, state = self._handle_branch(
-                candidates, state, base_cx, branch_cx, cx_list, debug_info,
-                y, weight, blue_count, blue_ratio
+            context = ScanLineContext(
+                y=y, weight=weight, state=state, base_cx=base_cx,
+                branch_cx=branch_cx, blue_count=blue_count, blue_ratio=blue_ratio
             )
-            cx_list.append((chosen_cx, weight))
+            result = self._handle_branch(
+                candidates, context, cx_list, debug_info)
+            cx_list.append((result.chosen_cx, weight))
+            chosen_cx = result.chosen_cx
+            branch_cx = result.branch_cx
+            state = result.state
         else:
             candidates: list[tuple[int, int, int]] = []
             chosen_cx = branch_cx
@@ -197,43 +224,55 @@ class NavigatorNode(Node):
             return "blue_to_black"
         return state
 
+    def _select_blob_center(self, candidates: list[tuple[int, int, int]], target_cx: float) -> int:
+        """Select the best blob center from candidates based on target."""
+        _, _, chosen_cx = min(candidates, key=lambda c: abs(c[2] - target_cx))
+        return chosen_cx
+
+    def _find_branch_candidates(self, candidates: list[tuple[int, int, int]], base_cx: float) -> list[tuple[int, int, int]]:
+        """Find candidates suitable for branching."""
+        return [
+            c for c in candidates
+            if abs(c[2] - base_cx) <= self.BRANCH_WINDOW
+            and c[1] >= self.MIN_BLOB_WIDTH
+        ]
+
+    def _select_branch_center(self, near_candidates: list[tuple[int, int, int]]) -> Optional[int]:
+        """Select branch center from near candidates."""
+        if len(near_candidates) >= 2:
+            _, _, branch_cx = max(near_candidates, key=lambda c: c[2])
+            return branch_cx
+        return None
+
     def _handle_branch(
         self,
-        candidates: list[tuple[int, int]],
-        state: str,
-        base_cx: float,
-        branch_cx: int | None,
+        candidates: list[tuple[int, int, int]],
+        context: ScanLineContext,
         cx_list: list[tuple[int, float]],
-        debug_info: list[tuple[int, int | None, str, int, float]],
-        y: int,
-        weight: float,
-        blue_count: int,
-        blue_ratio: float,
-    ) -> tuple[int, int | None, str]:
-        """Select blob center and handle branching logic, updating lists as needed."""
-        target = branch_cx if branch_cx is not None else base_cx
-        # choose initial blob candidate center
-        _, _, chosen_cx = min(candidates, key=lambda c: abs(c[2] - target))
+        debug_info: list[tuple[int, list[tuple[int, int, int]], int, str]],
+    ) -> BranchResult:
+        """Select blob center and handle branching logic."""
+        target = context.branch_cx if context.branch_cx is not None else context.base_cx
+        chosen_cx = self._select_blob_center(candidates, target)
 
-        if state == "blue_to_black" and branch_cx is None:
-            # determine near candidates for branching
-            near = [
-                c for c in candidates
-                if abs(c[2] - base_cx) <= self.BRANCH_WINDOW
-                and c[1] >= self.MIN_BLOB_WIDTH
-            ]
-            if len(near) >= 2:
-                # choose the rightmost valid branch
-                _, _, cx2 = max(near, key=lambda c: c[2])
-                branch_cx = cx2
+        result_branch_cx = context.branch_cx
+        result_state = context.state
+
+        if context.state == "blue_to_black" and context.branch_cx is None:
+            near_candidates = self._find_branch_candidates(
+                candidates, context.base_cx)
+            new_branch_cx = self._select_branch_center(near_candidates)
+
+            if new_branch_cx is not None:
+                result_branch_cx = new_branch_cx
                 # retroactively update previous entries with preserved branch_cx
-                cx_list[:] = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
-                # preserve original debug_info entries; do not overwrite chosen_cx in debug logs
-                state = "normal"
+                cx_list[:] = [(new_branch_cx, w_prev)
+                              for (_, w_prev) in cx_list]
+                result_state = "normal"
                 self.pending_branch -= 1
 
-        debug_info.append((y, candidates, chosen_cx, state))
-        return chosen_cx, branch_cx, state
+        debug_info.append((context.y, candidates, chosen_cx, result_state))
+        return BranchResult(chosen_cx, result_branch_cx, result_state)
 
     def _compute_velocity_params(self, cx_list, width):
         """Compute deviation, confidence, and averaged center from cx_list."""
