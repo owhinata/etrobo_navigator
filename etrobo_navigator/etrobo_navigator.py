@@ -436,6 +436,12 @@ class NavigatorNode(Node):
             1.0 - self.alpha
         ) * new_linear
         self.prev_linear = linear
+
+        # Debug logging for velocity control
+        self.get_logger().info(
+            f"deviation={deviation:.2f}, angular={angular:.4f}, linear={linear:.4f}"
+        )
+
         return linear, angular
 
     def _publish_cmd(self, linear, angular):
@@ -532,10 +538,22 @@ class NavigatorNode(Node):
                 1,
                 cv2.LINE_AA,
             )
+            # Add linear velocity display
+            linear_vel = self.prev_linear
+            cv2.putText(
+                debug_image,
+                f"Linear: {linear_vel:.2f}",
+                (10, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
             cv2.putText(
                 debug_image,
                 f"Confidence: {confidence:.2f}",
-                (10, 70),
+                (10, 90),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (255, 255, 255),
