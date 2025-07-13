@@ -79,10 +79,8 @@ class NavigatorNode(Node):
         linear, angular = self._compute_command(deviation)
         self._publish_cmd(linear, angular)
 
-        # log per-scanline blob info: start,width,chosen_center,state
+        # log per-scanline blob info: state and blob candidates (start,width; chosen marked with *)
         # compact per-scanline blob info: output all candidates and mark chosen
-        entries: list[str] = []
-        # compact per-scanline blob info: one entry per scanline with state, blobs(list start,width)
         entries: list[str] = []
         for _, candidates, chosen, state in debug_info:
             abbr = _STATE_ABBR.get(state, state)
@@ -217,6 +215,7 @@ class NavigatorNode(Node):
         _, _, chosen_cx = min(candidates, key=lambda c: abs(c[2] - target))
 
         if state == "blue_to_black" and branch_cx is None:
+            # determine near candidates for branching
             near = [
                 c for c in candidates
                 if abs(c[2] - base_cx) <= self.BRANCH_WINDOW
@@ -226,12 +225,9 @@ class NavigatorNode(Node):
                 # choose the rightmost valid branch
                 _, _, cx2 = max(near, key=lambda c: c[2])
                 branch_cx = cx2
-                # retroactively update previous entries with preserved candidates
+                # retroactively update previous entries with preserved branch_cx
                 cx_list[:] = [(branch_cx, w_prev) for (_, w_prev) in cx_list]
-                debug_info[:] = [
-                    (y0, candidates0, branch_cx, state0)
-                    for (y0, candidates0, _, state0) in debug_info
-                ]
+                # preserve original debug_info entries; do not overwrite chosen_cx in debug logs
                 state = "normal"
                 self.pending_branch -= 1
 
