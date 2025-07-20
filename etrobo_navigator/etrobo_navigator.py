@@ -94,9 +94,9 @@ class NavigatorNode(Node):
 
         # --- Parameters ---
         # Normalized y-positions of scan lines (0.0 = top, 1.0 = bottom)
-        # 6 scan lines for detection
+        # 6 scan lines for detection (adjusted for 20° camera tilt angle, down from 30°)
         self.scan_lines = [
-            0.625, 0.666, 0.708, 0.75, 0.791, 0.833
+            0.775, 0.816, 0.858, 0.9, 0.941, 0.983
         ]
         # Weights biased toward the lower part of the image (sum to 1.0)
         self.weights = [
